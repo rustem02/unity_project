@@ -56,8 +56,9 @@ namespace VRTraining.UI
         {
             if (summaryText != null)
             {
-                summaryText.text =
+                var summary =
                     $"Итог: OK {result.SuccessCount}  FAIL {result.FailedCount}  SKIP {result.SkippedCount}";
+                UiFontBootstrap.EnsureCharacters(summaryText, summary);
             }
 
             if (detailsText == null)
@@ -78,7 +79,7 @@ namespace VRTraining.UI
                 sb.AppendLine($"  {StatusGlyph(step.Status)}  {step.Description}");
             }
 
-            detailsText.text = sb.ToString().TrimStart();
+            UiFontBootstrap.EnsureCharacters(detailsText, sb.ToString().TrimStart());
         }
 
         private static string StatusGlyph(StepStatus status)

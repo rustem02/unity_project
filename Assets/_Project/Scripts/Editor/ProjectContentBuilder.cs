@@ -29,6 +29,7 @@ namespace VRTraining.EditorTools
         private const string ScenesPath = Root + "/Scenes";
         private const string MaterialsPath = Root + "/Materials";
         private const string SoPath = Root + "/ScriptableObjects";
+        private const string FontsPath = Root + "/Fonts";
 
         private static Font _uiFont;
 
@@ -105,6 +106,9 @@ namespace VRTraining.EditorTools
                         canvas.gameObject.SetActive(false);
                 }
 
+                // Edit-mode Dynamic fonts need an explicit OS atlas or Cyrillic collapses to lines.
+                ApplyEditModeReadableFont();
+
                 var cam = Object.FindAnyObjectByType<Camera>();
                 if (cam == null)
                     throw new System.Exception("No camera in Training scene.");
@@ -137,6 +141,94 @@ namespace VRTraining.EditorTools
                 // Magenta detector: sample center pixels shouldn't be pure magenta error color.
                 // (Rough check already done via shader names in VerifyProjectHealth.)
                 Debug.Log($"[VR Training] Screenshot saved: {outPath}");
+                EditorApplication.Exit(0);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError(ex);
+                EditorApplication.Exit(1);
+            }
+        }
+
+        private static void ApplyEditModeReadableFont()
+        {
+            var font = Font.CreateDynamicFontFromOSFont(
+                new[] { "Segoe UI", "Arial", "Tahoma", "Microsoft Sans Serif" }, 64);
+            if (font == null)
+                return;
+
+            const string sample =
+                "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя" +
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" +
+                "Документы Подтвердить Отклонить Выход Завершить Досмотр Служебка " +
+                "Попытаться ещё Возврат ходьба обзор телепорт клик взять Итог";
+            // Few sizes only — flooding the dynamic atlas makes glyphs render as lines.
+            foreach (var size in new[] { 64, 48, 40, 32 })
+                font.RequestCharactersInTexture(sample, size, FontStyle.Normal);
+
+            var texts = Object.FindObjectsByType<Text>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var ui in texts)
+            {
+                if (ui == null)
+                    continue;
+                ui.font = font;
+                if (!string.IsNullOrEmpty(ui.text))
+                    font.RequestCharactersInTexture(ui.text, ui.fontSize, ui.fontStyle);
+            }
+
+            Canvas.ForceUpdateCanvases();
+            foreach (var ui in texts)
+            {
+                if (ui == null)
+                    continue;
+                var value = ui.text;
+                ui.text = string.Empty;
+                ui.text = value;
+            }
+
+            Canvas.ForceUpdateCanvases();
+        }
+
+        /// <summary>Batch smoke: validates interactables are reachable by look-ray from spawn.</summary>
+        public static void SmokeTestInteractionsBatch()
+        {
+            try
+            {
+                BuildAllInternal(showDialog: false);
+                EditorSceneManager.OpenScene(ScenesPath + "/Training.unity");
+
+                var cam = Object.FindAnyObjectByType<Camera>();
+                var player = GameObject.FindGameObjectWithTag("Player");
+                if (cam == null || player == null)
+                    throw new System.Exception("Missing camera/player.");
+
+                var passport = GameObject.Find("passport");
+                var bag = GameObject.Find("suspicious_bag");
+                if (passport == null || bag == null)
+                    throw new System.Exception("Missing interactables.");
+
+                // Aim camera at passport and ensure a raycast hit.
+                cam.transform.position = player.transform.position + Vector3.up * 1.6f;
+                cam.transform.LookAt(passport.transform.position);
+                if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hitGrab, 12f))
+                    throw new System.Exception("Ray miss toward passport.");
+                if (hitGrab.collider.GetComponentInParent<GrabbableInteractable>() == null)
+                    throw new System.Exception("Passport ray did not hit GrabbableInteractable.");
+
+                cam.transform.LookAt(bag.transform.position);
+                if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hitClick, 12f))
+                    throw new System.Exception("Ray miss toward bag.");
+                if (hitClick.collider.GetComponentInParent<ClickableInteractable>() == null)
+                    throw new System.Exception("Bag ray did not hit ClickableInteractable.");
+
+                if (Object.FindAnyObjectByType<TeleportLocomotion>() == null)
+                    throw new System.Exception("TeleportLocomotion missing.");
+                if (Object.FindAnyObjectByType<DesktopInteractionRay>() == null)
+                    throw new System.Exception("DesktopInteractionRay missing.");
+                if (Object.FindAnyObjectByType<UiFontBootstrap>() == null)
+                    throw new System.Exception("UiFontBootstrap missing.");
+
+                Debug.Log("[VR Training] Interaction smoke PASS.");
                 EditorApplication.Exit(0);
             }
             catch (System.Exception ex)
@@ -217,6 +309,7 @@ namespace VRTraining.EditorTools
             Directory.CreateDirectory(ScenesPath);
             Directory.CreateDirectory(MaterialsPath);
             Directory.CreateDirectory(SoPath);
+            Directory.CreateDirectory(FontsPath);
             Directory.CreateDirectory(Root + "/Prefabs");
             Directory.CreateDirectory(Root + "/Audio");
         }
@@ -392,7 +485,7 @@ namespace VRTraining.EditorTools
             CreateEnvironment("LobbyRoom", mats, new Vector3(12f, 3f, 10f));
             var player = CreatePlayer(new Vector3(0f, 0.1f, -3f));
 
-            var canvas = CreateWorldCanvas("LobbyCanvas", new Vector3(0f, 1.6f, 2.5f), new Vector2(1200, 800), 0.0022f);
+            var canvas = CreateWorldCanvas("LobbyCanvas", new Vector3(0f, 1.6f, 2.5f), new Vector2(1200, 800), 0.0028f);
             var panel = CreatePanel(canvas.transform, "Panel", Vector2.zero, new Vector2(1100, 700));
             CreateUiText(panel.transform, "Title", "VR TRAINING", 64, new Vector2(0, 220), new Vector2(1000, 100), TextAnchor.MiddleCenter);
             CreateUiText(panel.transform, "Subtitle", "Лобби - выберите действие", 36, new Vector2(0, 120), new Vector2(1000, 60), TextAnchor.MiddleCenter);
@@ -405,6 +498,7 @@ namespace VRTraining.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
 
             canvas.gameObject.AddComponent<DualInputUiBootstrap>();
+            canvas.gameObject.AddComponent<UiFontBootstrap>();
             CreateEventSystem();
 
             EditorSceneManager.SaveScene(scene, ScenesPath + "/Lobby.unity");
@@ -434,16 +528,17 @@ namespace VRTraining.EditorTools
             raySo.ApplyModifiedPropertiesWithoutUndo();
             systems.AddComponent<DualInputUiBootstrap>();
             systems.AddComponent<InteractableResetService>();
+            systems.AddComponent<UiFontBootstrap>();
 
             // On-screen controls hint (readable, not a gameplay blocker).
-            var hint = CreateWorldCanvas("ControlsHint", new Vector3(0f, 2.6f, -3.2f), new Vector2(1100, 220), 0.0018f, raycastTarget: false);
+            var hint = CreateWorldCanvas("ControlsHint", new Vector3(0f, 2.55f, -3.5f), new Vector2(1100, 180), 0.0024f, raycastTarget: false);
             CreateUiText(
                 hint.transform,
                 "Hint",
                 "WASD - ходьба | ПКМ - обзор | T - телепорт | ЛКМ - клик | E - взять",
-                30,
+                32,
                 Vector2.zero,
-                new Vector2(1050, 180),
+                new Vector2(1050, 140),
                 TextAnchor.MiddleCenter);
 
             // Tables / props
@@ -451,42 +546,39 @@ namespace VRTraining.EditorTools
             var inspTable = CreatePrimitive(PrimitiveType.Cube, "InspectionTable", new Vector3(3.5f, 0.4f, 2f), new Vector3(1.8f, 0.8f, 1.1f), mats["Table"]);
             var exitDesk = CreatePrimitive(PrimitiveType.Cube, "ExitDesk", new Vector3(0f, 0.4f, 5.5f), new Vector3(1.4f, 0.8f, 0.8f), mats["Table"]);
 
-            CreateZone("zone_documents", new Vector3(-4f, 0.05f, 0.6f), new Vector3(2.2f, 0.1f, 2.2f), mats["Zone"]);
-            CreateZone("zone_inspection", new Vector3(3.5f, 0.05f, 0.5f), new Vector3(2.4f, 0.1f, 2.4f), mats["Zone"]);
-            CreateZone("zone_exit", new Vector3(0f, 0.05f, 4.2f), new Vector3(2.2f, 0.1f, 2f), mats["Zone"]);
+            CreateZone("zone_documents", new Vector3(-4f, 0.05f, 0.6f), new Vector3(2.2f, 0.1f, 2.2f), mats["Zone"], "Документы");
+            CreateZone("zone_inspection", new Vector3(3.5f, 0.05f, 0.5f), new Vector3(2.4f, 0.1f, 2.4f), mats["Zone"], "Досмотр");
+            CreateZone("zone_exit", new Vector3(0f, 0.05f, 4.2f), new Vector3(2.2f, 0.1f, 2f), mats["Zone"], "Выход");
             // Wrong zone distractor
-            CreateZone("zone_wrong", new Vector3(-7f, 0.05f, -2f), new Vector3(1.8f, 0.1f, 1.8f), mats["Zone"]);
+            CreateZone("zone_wrong", new Vector3(-7f, 0.05f, -2f), new Vector3(1.8f, 0.1f, 1.8f), mats["Zone"], "Служебка");
 
-            var passport = CreateInteractableCube("passport", new Vector3(-4f, 0.95f, 2f), new Vector3(0.25f, 0.04f, 0.35f), mats["Document"], grab: true);
-            var wrongPaper = CreateInteractableCube("wrong_paper", new Vector3(-3.5f, 0.95f, 2.15f), new Vector3(0.22f, 0.03f, 0.3f), mats["Panel"], grab: true);
+            var passport = CreateInteractableCube("passport", new Vector3(-4f, 0.98f, 2f), new Vector3(0.35f, 0.08f, 0.45f), mats["Document"], grab: true);
+            var wrongPaper = CreateInteractableCube("wrong_paper", new Vector3(-3.45f, 0.98f, 2.15f), new Vector3(0.3f, 0.06f, 0.38f), mats["Panel"], grab: true);
 
-            var bag = CreateInteractableCube("suspicious_bag", new Vector3(3.3f, 0.95f, 2f), new Vector3(0.45f, 0.3f, 0.55f), mats["Accent"], click: true);
-            var decoy = CreateInteractableCube("decoy_box", new Vector3(3.9f, 0.95f, 2.2f), new Vector3(0.3f, 0.25f, 0.3f), mats["Wall"], click: true);
-            var contraband = CreateInteractableCube("contraband", new Vector3(3.5f, 0.95f, 1.55f), new Vector3(0.2f, 0.15f, 0.2f), mats["Contraband"], grab: true);
+            var bag = CreateInteractableCube("suspicious_bag", new Vector3(3.3f, 1.05f, 2f), new Vector3(0.5f, 0.35f, 0.55f), mats["Accent"], click: true);
+            var decoy = CreateInteractableCube("decoy_box", new Vector3(3.9f, 1.0f, 2.2f), new Vector3(0.35f, 0.3f, 0.35f), mats["Wall"], click: true);
+            var contraband = CreateInteractableCube("contraband", new Vector3(3.5f, 0.98f, 1.55f), new Vector3(0.28f, 0.2f, 0.28f), mats["Contraband"], grab: true);
 
-            var indicator = CreateInteractableCube("exit_indicator", new Vector3(0.5f, 1.4f, 5.5f), new Vector3(0.25f, 0.25f, 0.25f), mats["Accent"], click: true);
+            var indicator = CreateInteractableCube("exit_indicator", new Vector3(0.55f, 1.45f, 5.5f), new Vector3(0.35f, 0.35f, 0.35f), mats["Accent"], click: true);
 
-            // Scenario UI near documents
-            var confirmCanvas = CreateWorldCanvas("ConfirmCanvas", new Vector3(-4f, 1.55f, 2.55f), new Vector2(600, 220), 0.0018f);
-            CreateUiText(confirmCanvas.transform, "Label", "Документы", 40, new Vector2(0, 60), new Vector2(560, 50), TextAnchor.MiddleCenter);
-            CreateScenarioButton(confirmCanvas.transform, "ConfirmBtn", "Подтвердить", "btn_confirm", new Vector2(0, -30), new Vector2(420, 90));
-            CreateScenarioButton(confirmCanvas.transform, "WrongBtn", "Отклонить", "btn_reject", new Vector2(0, -130), new Vector2(420, 70));
+            // Scenario UI in FRONT of tables (toward player) — behind the desk reads as thin lines.
+            var confirmCanvas = CreateWorldCanvas("ConfirmCanvas", new Vector3(-4f, 1.55f, 1.35f), new Vector2(700, 280), 0.0028f);
+            CreateScenarioButton(confirmCanvas.transform, "ConfirmBtn", "Подтвердить", "btn_confirm", new Vector2(0, 50), new Vector2(520, 100));
+            CreateScenarioButton(confirmCanvas.transform, "WrongBtn", "Отклонить", "btn_reject", new Vector2(0, -70), new Vector2(520, 90));
 
-            var finishCanvas = CreateWorldCanvas("FinishCanvas", new Vector3(0f, 1.55f, 6.1f), new Vector2(600, 220), 0.0018f);
-            CreateUiText(finishCanvas.transform, "Label", "Выход", 40, new Vector2(0, 60), new Vector2(560, 50), TextAnchor.MiddleCenter);
-            CreateScenarioButton(finishCanvas.transform, "FinishBtn", "Завершить", "btn_finish", new Vector2(0, -30), new Vector2(420, 90));
+            // Offset on X so the panel is viewed at an angle (dead-center backface reads as a line).
+            var finishCanvas = CreateWorldCanvas("FinishCanvas", new Vector3(1.15f, 1.9f, 3.7f), new Vector2(700, 160), 0.0032f);
+            CreateScenarioButton(finishCanvas.transform, "FinishBtn", "Завершить", "btn_finish", new Vector2(0, 0), new Vector2(560, 110));
 
             // Info + results + HUD
             var hudCanvas = CreateWorldCanvas("HudCanvas", new Vector3(0f, 2.2f, 0f), new Vector2(900, 260), 0.0015f, raycastTarget: false);
-            hudCanvas.transform.SetParent(Camera.main != null ? Camera.main.transform : null, false);
-            // Attach HUD to player camera if present
             var cam = Object.FindAnyObjectByType<Camera>();
             if (cam != null)
             {
                 hudCanvas.transform.SetParent(cam.transform, false);
-                hudCanvas.transform.localPosition = new Vector3(0f, -0.15f, 0.7f);
+                hudCanvas.transform.localPosition = new Vector3(0f, -0.12f, 0.85f);
                 hudCanvas.transform.localRotation = Quaternion.identity;
-                hudCanvas.transform.localScale = Vector3.one * 0.0012f;
+                hudCanvas.transform.localScale = Vector3.one * 0.0016f;
             }
 
             var infoGo = new GameObject("InfoPanel", typeof(RectTransform), typeof(CanvasGroup));
@@ -504,7 +596,7 @@ namespace VRTraining.EditorTools
             infoSo.FindProperty("bodyText").objectReferenceValue = infoBody;
             infoSo.ApplyModifiedPropertiesWithoutUndo();
 
-            var resultsCanvas = CreateWorldCanvas("ResultsCanvas", new Vector3(0f, 1.7f, 1.5f), new Vector2(1100, 900), 0.002f);
+            var resultsCanvas = CreateWorldCanvas("ResultsCanvas", new Vector3(0f, 1.7f, 1.5f), new Vector2(1100, 900), 0.0026f);
             var resultsPanelGo = CreatePanel(resultsCanvas.transform, "ResultsPanel", Vector2.zero, new Vector2(1000, 820));
             var resultsCg = resultsPanelGo.AddComponent<CanvasGroup>();
             var summary = CreateUiText(resultsPanelGo.transform, "Summary", "Итог", 42, new Vector2(0, 340), new Vector2(920, 60), TextAnchor.MiddleCenter);
@@ -596,6 +688,7 @@ namespace VRTraining.EditorTools
             var head = new GameObject("Head");
             head.transform.SetParent(player.transform);
             head.transform.localPosition = new Vector3(0f, 1.6f, 0f);
+            head.tag = "MainCamera";
             var cam = head.AddComponent<Camera>();
             cam.nearClipPlane = 0.05f;
             head.AddComponent<AudioListener>();
@@ -616,7 +709,7 @@ namespace VRTraining.EditorTools
             return player;
         }
 
-        private static GameObject CreateZone(string id, Vector3 pos, Vector3 size, Material mat)
+        private static GameObject CreateZone(string id, Vector3 pos, Vector3 size, Material mat, string labelOverride = null)
         {
             var go = CreatePrimitive(PrimitiveType.Cube, "Zone_" + id, pos, size, mat);
             Object.DestroyImmediate(go.GetComponent<Collider>());
@@ -632,8 +725,10 @@ namespace VRTraining.EditorTools
             oSo.ApplyModifiedPropertiesWithoutUndo();
 
             // Label uses its own unscaled world canvas — TextMesh under scaled zone becomes a "line".
-            var label = id.Replace("zone_", string.Empty).ToUpperInvariant();
-            var canvas = CreateWorldCanvas("Label_" + id, pos + Vector3.up * 1.35f, new Vector2(520, 120), 0.0025f, raycastTarget: false);
+            var label = string.IsNullOrEmpty(labelOverride)
+                ? id.Replace("zone_", string.Empty).ToUpperInvariant()
+                : labelOverride;
+            var canvas = CreateWorldCanvas("Label_" + id, pos + Vector3.up * 1.35f, new Vector2(520, 120), 0.003f, raycastTarget: false);
             CreateUiText(canvas.transform, "Text", label, 48, Vector2.zero, new Vector2(500, 100), TextAnchor.MiddleCenter);
             return go;
         }
@@ -687,8 +782,12 @@ namespace VRTraining.EditorTools
             if (raycastTarget)
                 go.AddComponent<GraphicRaycaster>();
             go.transform.position = pos;
-            // Face spawn side (-Z) so text is readable when entering the room.
-            go.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+            var toPlayer = new Vector3(0f, pos.y, -5f) - pos;
+            toPlayer.y = 0f;
+            if (toPlayer.sqrMagnitude < 0.001f)
+                toPlayer = Vector3.back;
+            // Forward away from player → front faces the spawn (readable, not mirrored).
+            go.transform.rotation = Quaternion.LookRotation((-toPlayer).normalized, Vector3.up);
             go.transform.localScale = Vector3.one * scale;
             var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
@@ -710,14 +809,26 @@ namespace VRTraining.EditorTools
 
         private static Font CreateCyrillicFont()
         {
-            // Builtin LegacyRuntime often lacks Cyrillic → glyphs become empty strokes/"lines".
-            var os = Font.CreateDynamicFontFromOSFont(
-                new[] { "Segoe UI", "Arial", "Tahoma", "Microsoft Sans Serif", "DejaVu Sans" },
-                64);
-            if (os != null)
-                return os;
+            // Must be a project asset so Text.font serializes into scenes.
+            // Runtime UiFontBootstrap swaps to OS Dynamic for reliable Cyrillic glyphs.
+            var imported = UiFontImporter.EnsureDynamicFont();
+            if (imported != null)
+            {
+                const string sample =
+                    "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя" +
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" +
+                    "Документы Подтвердить Отклонить Выход Завершить Итог Лобби Досмотр Служебка " +
+                    "Попытаться ещё Возврат ходьба обзор телепорт клик взять | -";
+                foreach (var size in new[] { 64, 48, 40, 32 })
+                    imported.RequestCharactersInTexture(sample, size, FontStyle.Normal);
+                return imported;
+            }
 
-            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+            var os = Font.CreateDynamicFontFromOSFont(
+                new[] { "Segoe UI", "Arial", "Tahoma", "Microsoft Sans Serif" },
+                64);
+            return os
+                   ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
                    ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
         }
 
@@ -731,14 +842,20 @@ namespace VRTraining.EditorTools
             rt.sizeDelta = size;
             var ui = go.AddComponent<Text>();
             if (_uiFont != null)
+            {
                 ui.font = _uiFont;
+                if (!string.IsNullOrEmpty(text))
+                    _uiFont.RequestCharactersInTexture(text, fontSize, FontStyle.Normal);
+            }
+
             ui.text = text;
             ui.fontSize = fontSize;
             ui.alignment = align;
             ui.color = Color.white;
-            ui.horizontalOverflow = HorizontalWrapMode.Wrap;
+            ui.horizontalOverflow = HorizontalWrapMode.Overflow;
             ui.verticalOverflow = VerticalWrapMode.Overflow;
             ui.supportRichText = false;
+            ui.resizeTextForBestFit = false;
             return ui;
         }
 
@@ -749,10 +866,20 @@ namespace VRTraining.EditorTools
             var rt = go.GetComponent<RectTransform>();
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
-            go.GetComponent<Image>().color = new Color(0.2f, 0.45f, 0.75f, 1f);
-            var ui = CreateUiText(go.transform, "Label", label, 34, Vector2.zero, size, TextAnchor.MiddleCenter);
-            ui.raycastTarget = false;
-            return go.GetComponent<Button>();
+            var image = go.GetComponent<Image>();
+            image.color = new Color(0.2f, 0.45f, 0.75f, 1f);
+            var button = go.GetComponent<Button>();
+            button.targetGraphic = image;
+            button.transition = Selectable.Transition.None;
+
+            // Sibling label under same parent canvas (not tinted / crushed by Button graphic).
+            var labelUi = CreateUiText(parent, name + "_Label", label, 40, pos, size - new Vector2(20f, 20f), TextAnchor.MiddleCenter);
+            labelUi.raycastTarget = false;
+            // Pull label toward camera to avoid Z-fight with the Image (reads as a white line).
+            var labelRt = labelUi.rectTransform;
+            labelRt.localPosition = new Vector3(labelRt.localPosition.x, labelRt.localPosition.y, -3f);
+            labelUi.transform.SetSiblingIndex(go.transform.GetSiblingIndex() + 1);
+            return button;
         }
 
         private static void CreateScenarioButton(

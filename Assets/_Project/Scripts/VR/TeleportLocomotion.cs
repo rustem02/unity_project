@@ -6,8 +6,8 @@ using UnityEngine.InputSystem;
 namespace VRTraining.VR
 {
     /// <summary>
-    /// Point-and-teleport: hold T, aim with look/mouse, release to blink.
-    /// Works with CharacterController (temporarily disables it while moving the root).
+    /// Point-and-teleport: hold T to preview, release to blink.
+    /// Aims along camera look (stable with locked cursor / RMB look).
     /// </summary>
     public class TeleportLocomotion : MonoBehaviour
     {
@@ -17,13 +17,13 @@ namespace VRTraining.VR
         [SerializeField] private LayerMask groundMask = ~0;
         [SerializeField] private float maxDistance = 14f;
         [SerializeField] private KeyCode teleportKey = KeyCode.T;
-        [SerializeField] private bool useMouseAim = true;
         [SerializeField] private LineRenderer previewLine;
         [SerializeField] private Color validColor = new Color(0.2f, 0.9f, 0.5f, 0.8f);
         [SerializeField] private Color invalidColor = new Color(0.9f, 0.2f, 0.2f, 0.8f);
 
         private bool _hasTarget;
         private Vector3 _targetPoint;
+        private bool _wasHolding;
 
         private void Awake()
         {
@@ -45,8 +45,8 @@ namespace VRTraining.VR
             go.transform.SetParent(transform, false);
             previewLine = go.AddComponent<LineRenderer>();
             previewLine.positionCount = 2;
-            previewLine.startWidth = 0.03f;
-            previewLine.endWidth = 0.03f;
+            previewLine.startWidth = 0.04f;
+            previewLine.endWidth = 0.04f;
             var shader = Shader.Find("Universal Render Pipeline/Unlit")
                          ?? Shader.Find("Sprites/Default")
                          ?? Shader.Find("Unlit/Color");
@@ -62,10 +62,10 @@ namespace VRTraining.VR
                 return;
 
             var held = IsKeyHeld(teleportKey);
-            var released = WasKeyReleased(teleportKey);
 
             if (held)
             {
+                _wasHolding = true;
                 UpdateAim();
                 previewLine.enabled = true;
                 previewLine.startColor = previewLine.endColor = _hasTarget ? validColor : invalidColor;
@@ -75,18 +75,20 @@ namespace VRTraining.VR
                 previewLine.SetPosition(1,
                     _hasTarget
                         ? _targetPoint
-                        : aimCamera.transform.position + GetAimDirection() * maxDistance);
-            }
-            else if (released)
-            {
-                if (_hasTarget)
-                    TeleportTo(_targetPoint);
-                previewLine.enabled = false;
-                _hasTarget = false;
+                        : aimCamera.transform.position + aimCamera.transform.forward * maxDistance);
             }
             else
             {
+                if (_wasHolding)
+                {
+                    UpdateAim();
+                    if (_hasTarget)
+                        TeleportTo(_targetPoint);
+                }
+
+                _wasHolding = false;
                 previewLine.enabled = false;
+                _hasTarget = false;
             }
         }
 
@@ -107,7 +109,7 @@ namespace VRTraining.VR
 
         private void UpdateAim()
         {
-            var ray = new Ray(aimCamera.transform.position, GetAimDirection());
+            var ray = new Ray(aimCamera.transform.position, aimCamera.transform.forward);
             if (Physics.Raycast(ray, out var hit, maxDistance, groundMask, QueryTriggerInteraction.Ignore))
             {
                 // Prefer roughly horizontal surfaces (floor / tables), reject steep walls.
@@ -122,26 +124,6 @@ namespace VRTraining.VR
             _hasTarget = false;
         }
 
-        private Vector3 GetAimDirection()
-        {
-            if (useMouseAim)
-            {
-                var mouseRay = aimCamera.ScreenPointToRay(GetMousePosition());
-                return mouseRay.direction;
-            }
-
-            return aimCamera.transform.forward;
-        }
-
-        private static Vector2 GetMousePosition()
-        {
-#if ENABLE_INPUT_SYSTEM
-            if (Mouse.current != null)
-                return Mouse.current.position.ReadValue();
-#endif
-            return Input.mousePosition;
-        }
-
         private static bool IsKeyHeld(KeyCode key)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -149,15 +131,6 @@ namespace VRTraining.VR
                 return Keyboard.current.tKey.isPressed;
 #endif
             return Input.GetKey(key);
-        }
-
-        private static bool WasKeyReleased(KeyCode key)
-        {
-#if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && key == KeyCode.T)
-                return Keyboard.current.tKey.wasReleasedThisFrame;
-#endif
-            return Input.GetKeyUp(key);
         }
     }
 }

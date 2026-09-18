@@ -56,9 +56,10 @@ namespace VRTraining.UI
         private void OnGroupActivated(GroupActivatedEvent evt)
         {
             if (titleText != null)
-                titleText.text = evt.GroupTitle;
+                UiFontBootstrap.EnsureCharacters(titleText, evt.GroupTitle);
+
             if (bodyText != null)
-                bodyText.text = evt.InfoMessage;
+                UiFontBootstrap.EnsureCharacters(bodyText, evt.InfoMessage);
 
             _visible = true;
             _hideAt = Time.time + visibleSeconds;

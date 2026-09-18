@@ -29,8 +29,17 @@ namespace VRTraining.Highlight
         private void Awake()
         {
             _block = new MaterialPropertyBlock();
-            if (renderers == null || renderers.Length == 0)
+
+            // UI buttons use CanvasRenderer, not MeshRenderer — skip mesh outline there.
+            if (GetComponentInParent<Canvas>() != null)
+            {
+                createOutlineQuad = false;
+                renderers = System.Array.Empty<Renderer>();
+            }
+            else if (renderers == null || renderers.Length == 0)
+            {
                 renderers = GetComponentsInChildren<Renderer>();
+            }
 
             CacheOriginalColors();
 

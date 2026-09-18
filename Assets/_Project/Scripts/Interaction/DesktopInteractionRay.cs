@@ -8,7 +8,7 @@ namespace VRTraining.Interaction
 {
     /// <summary>
     /// Desktop mouse/keyboard interactions for click + grab.
-    /// Uses camera→mouse ray; does not block on world-space HUD canvases.
+    /// When cursor is locked (look mode), aims from screen center (look direction).
     /// </summary>
     public class DesktopInteractionRay : MonoBehaviour
     {
@@ -16,7 +16,6 @@ namespace VRTraining.Interaction
         [SerializeField] private float maxDistance = 12f;
         [SerializeField] private LayerMask interactableMask = ~0;
         [SerializeField] private KeyCode grabKey = KeyCode.E;
-        [SerializeField] private bool debugLogs;
 
         private void Awake()
         {
@@ -41,41 +40,35 @@ namespace VRTraining.Interaction
         private void TryClick()
         {
             if (!Physics.Raycast(GetRay(), out var hit, maxDistance, interactableMask, QueryTriggerInteraction.Ignore))
-            {
-                if (debugLogs)
-                    Debug.Log("[DesktopRay] Click miss");
                 return;
-            }
 
             var clickable = hit.collider.GetComponentInParent<ClickableInteractable>();
             if (clickable != null)
             {
-                if (debugLogs)
-                    Debug.Log($"[DesktopRay] Click -> {clickable.TargetId}");
                 clickable.NotifyClicked();
+                return;
             }
+
+            // Convenience: LMB also grabs when pointing at a grabbable.
+            var grabbable = hit.collider.GetComponentInParent<GrabbableInteractable>();
+            grabbable?.NotifyGrabbed();
         }
 
         private void TryGrab()
         {
             if (!Physics.Raycast(GetRay(), out var hit, maxDistance, interactableMask, QueryTriggerInteraction.Ignore))
-            {
-                if (debugLogs)
-                    Debug.Log("[DesktopRay] Grab miss");
                 return;
-            }
 
             var grabbable = hit.collider.GetComponentInParent<GrabbableInteractable>();
-            if (grabbable != null)
-            {
-                if (debugLogs)
-                    Debug.Log($"[DesktopRay] Grab -> {grabbable.TargetId}");
-                grabbable.NotifyGrabbed();
-            }
+            grabbable?.NotifyGrabbed();
         }
 
         private Ray GetRay()
         {
+            // Locked cursor → FPS crosshair (look direction). Free cursor → mouse pointer.
+            if (Cursor.lockState == CursorLockMode.Locked)
+                return rayCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+
             return rayCamera.ScreenPointToRay(GetMousePosition());
         }
 
@@ -129,9 +122,6 @@ namespace VRTraining.Interaction
         private static bool IsBlockingScreenUi()
         {
             if (EventSystem.current == null)
-                return false;
-
-            if (!EventSystem.current.IsPointerOverGameObject())
                 return false;
 
             var results = new System.Collections.Generic.List<RaycastResult>();
