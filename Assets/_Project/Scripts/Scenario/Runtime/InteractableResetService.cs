@@ -34,8 +34,8 @@ namespace VRTraining.Scenario.Runtime
 
         private void OnGroupActivated(GroupActivatedEvent evt)
         {
-            if (evt.GroupIndex == 0)
-                ResetAllInteractables();
+            // Reset one-shots at every group start so multi-run / restart stays playable.
+            ResetAllInteractables();
         }
     }
 }

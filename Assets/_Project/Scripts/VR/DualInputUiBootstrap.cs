@@ -2,15 +2,15 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 #if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
 #endif
+using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace VRTraining.VR
 {
     /// <summary>
-    /// Ensures UI works with mouse and (when present) Input System UI module.
-    /// World-space canvases get GraphicRaycaster so buttons stay clickable.
+    /// Mouse UI module + world-space GraphicRaycasters (+ XR TrackedDeviceGraphicRaycaster).
+    /// Skips HUD / hint / label canvases so they never steal gameplay rays.
     /// </summary>
     public class DualInputUiBootstrap : MonoBehaviour
     {
@@ -34,7 +34,6 @@ namespace VRTraining.VR
         private void EnsureMouseModule()
         {
 #if ENABLE_INPUT_SYSTEM
-            // Prefer Input System UI module when the new Input System is active.
             var legacy = eventSystem.GetComponent<StandaloneInputModule>();
             if (eventSystem.GetComponent<InputSystemUIInputModule>() == null)
             {
@@ -52,6 +51,7 @@ namespace VRTraining.VR
 
         private void EnsureWorldCanvases()
         {
+            var cam = Camera.main;
             var canvases = FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             for (var i = 0; i < canvases.Length; i++)
             {
@@ -59,8 +59,19 @@ namespace VRTraining.VR
                 if (canvas.renderMode != RenderMode.WorldSpace)
                     continue;
 
+                if (canvas.name is "HudCanvas" or "ControlsHint" or "CrosshairCanvas")
+                    continue;
+                if (canvas.name.StartsWith("Label_"))
+                    continue;
+
+                if (cam != null)
+                    canvas.worldCamera = cam;
+
                 if (canvas.GetComponent<GraphicRaycaster>() == null)
                     canvas.gameObject.AddComponent<GraphicRaycaster>();
+
+                if (canvas.GetComponent<TrackedDeviceGraphicRaycaster>() == null)
+                    canvas.gameObject.AddComponent<TrackedDeviceGraphicRaycaster>();
             }
         }
     }

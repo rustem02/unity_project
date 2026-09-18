@@ -199,27 +199,44 @@ namespace VRTraining.EditorTools
 
                 var cam = Object.FindAnyObjectByType<Camera>();
                 var player = GameObject.FindGameObjectWithTag("Player");
+                var controller = Object.FindAnyObjectByType<ScenarioController>();
                 if (cam == null || player == null)
                     throw new System.Exception("Missing camera/player.");
+                if (controller == null || controller.Scenario == null)
+                    throw new System.Exception("ScenarioController.scenario is null.");
 
                 var passport = GameObject.Find("passport");
                 var bag = GameObject.Find("suspicious_bag");
                 if (passport == null || bag == null)
                     throw new System.Exception("Missing interactables.");
 
-                // Aim camera at passport and ensure a raycast hit.
                 cam.transform.position = player.transform.position + Vector3.up * 1.6f;
                 cam.transform.LookAt(passport.transform.position);
-                if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hitGrab, 12f))
-                    throw new System.Exception("Ray miss toward passport.");
-                if (hitGrab.collider.GetComponentInParent<GrabbableInteractable>() == null)
-                    throw new System.Exception("Passport ray did not hit GrabbableInteractable.");
+                var grabHits = Physics.SphereCastAll(cam.transform.position, 0.15f, cam.transform.forward, 12f);
+                System.Array.Sort(grabHits, (a, b) => a.distance.CompareTo(b.distance));
+                GrabbableInteractable foundGrab = null;
+                for (var i = 0; i < grabHits.Length; i++)
+                {
+                    foundGrab = grabHits[i].collider.GetComponentInParent<GrabbableInteractable>();
+                    if (foundGrab != null)
+                        break;
+                }
+
+                if (foundGrab == null)
+                    throw new System.Exception("Passport aim did not hit GrabbableInteractable (prefer-over-table).");
 
                 cam.transform.LookAt(bag.transform.position);
-                if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hitClick, 12f))
-                    throw new System.Exception("Ray miss toward bag.");
-                if (hitClick.collider.GetComponentInParent<ClickableInteractable>() == null)
-                    throw new System.Exception("Bag ray did not hit ClickableInteractable.");
+                var clickHits = Physics.SphereCastAll(cam.transform.position, 0.15f, cam.transform.forward, 12f);
+                ClickableInteractable foundClick = null;
+                for (var i = 0; i < clickHits.Length; i++)
+                {
+                    foundClick = clickHits[i].collider.GetComponentInParent<ClickableInteractable>();
+                    if (foundClick != null)
+                        break;
+                }
+
+                if (foundClick == null)
+                    throw new System.Exception("Bag aim did not hit ClickableInteractable.");
 
                 if (Object.FindAnyObjectByType<TeleportLocomotion>() == null)
                     throw new System.Exception("TeleportLocomotion missing.");
@@ -227,6 +244,21 @@ namespace VRTraining.EditorTools
                     throw new System.Exception("DesktopInteractionRay missing.");
                 if (Object.FindAnyObjectByType<UiFontBootstrap>() == null)
                     throw new System.Exception("UiFontBootstrap missing.");
+
+                // Multi-action step must exist (TZ: step may require several actions).
+                var hasMulti = false;
+                for (var g = 0; g < controller.Scenario.Groups.Count; g++)
+                {
+                    var steps = controller.Scenario.Groups[g].Steps;
+                    for (var s = 0; s < steps.Count; s++)
+                    {
+                        if (steps[s].ExpectedActions != null && steps[s].ExpectedActions.Count > 1)
+                            hasMulti = true;
+                    }
+                }
+
+                if (!hasMulti)
+                    throw new System.Exception("No multi-action step in scenario.");
 
                 Debug.Log("[VR Training] Interaction smoke PASS.");
                 EditorApplication.Exit(0);
@@ -290,6 +322,28 @@ namespace VRTraining.EditorTools
                 }
             }
 
+            // Scenario must be wired on Training scene controller.
+            var trainingScene = EditorSceneManager.OpenScene(ScenesPath + "/Training.unity", OpenSceneMode.Additive);
+            try
+            {
+                var ctrl = Object.FindAnyObjectByType<ScenarioController>();
+                if (ctrl == null || ctrl.Scenario == null)
+                {
+                    Debug.LogError("[VR Training] Verify FAIL: ScenarioController.scenario is null in Training scene.");
+                    ok = false;
+                }
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(trainingScene, true);
+            }
+
+            if (AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(Root + "/Resources/TrainingScenario.asset") == null)
+            {
+                Debug.LogError("[VR Training] Verify FAIL: Resources/TrainingScenario.asset missing.");
+                ok = false;
+            }
+
             Debug.Log(ok ? "[VR Training] Verify PASS." : "[VR Training] Verify FAIL.");
             return ok;
         }
@@ -312,6 +366,7 @@ namespace VRTraining.EditorTools
             Directory.CreateDirectory(FontsPath);
             Directory.CreateDirectory(Root + "/Prefabs");
             Directory.CreateDirectory(Root + "/Audio");
+            Directory.CreateDirectory(Root + "/Resources");
         }
 
         private static Dictionary<string, Material> CreateMaterials()
@@ -401,8 +456,8 @@ namespace VRTraining.EditorTools
                     Title = "Поиск нарушений",
                     InfoMessage =
                         "1) Подойдите к зоне досмотра багажа.\n" +
-                        "2) Кликните лучом по подозрительному предмету.\n" +
-                        "3) Возьмите изъятый предмет.",
+                        "2) Кликните по подозрительной сумке и изъмите предмет (grab) — оба действия в одном шаге.\n" +
+                        "3) Повторно зайдите в зону досмотра для фиксации.",
                     Steps = new List<StepDefinition>
                     {
                         new StepDefinition
@@ -416,20 +471,21 @@ namespace VRTraining.EditorTools
                         },
                         new StepDefinition
                         {
-                            Id = "insp_click",
-                            Description = "Кликнуть по подозрительному объекту",
+                            Id = "insp_search",
+                            Description = "Кликнуть по сумке и изъять предмет (grab)",
                             ExpectedActions = new List<ExpectedAction>
                             {
-                                new ExpectedAction { ActionType = ActionType.Click, TargetId = "suspicious_bag" }
+                                new ExpectedAction { ActionType = ActionType.Click, TargetId = "suspicious_bag" },
+                                new ExpectedAction { ActionType = ActionType.Grab, TargetId = "contraband" }
                             }
                         },
                         new StepDefinition
                         {
-                            Id = "insp_grab",
-                            Description = "Изъять предмет (grab)",
+                            Id = "insp_recheck",
+                            Description = "Повторно войти в зону досмотра",
                             ExpectedActions = new List<ExpectedAction>
                             {
-                                new ExpectedAction { ActionType = ActionType.Grab, TargetId = "contraband" }
+                                new ExpectedAction { ActionType = ActionType.ReachZone, TargetId = "zone_inspection" }
                             }
                         }
                     }
@@ -474,9 +530,24 @@ namespace VRTraining.EditorTools
                 }
             };
 
-            // Distractors for wrong-target failures
+            // Distractors for wrong-target failures (wrong zone / wrong grab / wrong UI).
             EditorUtility.SetDirty(asset);
-            return asset;
+            AssetDatabase.SaveAssets();
+
+            // Runtime fallback copy for ScenarioController.Resources.Load.
+            var resourcesPath = Root + "/Resources/TrainingScenario.asset";
+            if (AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(resourcesPath) == null)
+                AssetDatabase.CopyAsset(path, resourcesPath);
+            else
+            {
+                var res = AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(resourcesPath);
+                EditorUtility.CopySerialized(asset, res);
+                EditorUtility.SetDirty(res);
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            return AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(path);
         }
 
         private static void BuildLobbyScene(Dictionary<string, Material> mats)
@@ -513,10 +584,18 @@ namespace VRTraining.EditorTools
             // Systems
             var systems = new GameObject("Systems");
             var controller = systems.AddComponent<ScenarioController>();
+
+            // Persist SO reference: save assets first, reload, then assign + dirty scene.
+            AssetDatabase.SaveAssets();
+            var scenarioRef = AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(SoPath + "/TrainingScenario.asset");
+            if (scenarioRef == null)
+                scenarioRef = scenario;
+
             var controllerSo = new SerializedObject(controller);
-            controllerSo.FindProperty("scenario").objectReferenceValue = scenario;
+            controllerSo.FindProperty("scenario").objectReferenceValue = scenarioRef;
             controllerSo.FindProperty("autoStart").boolValue = true;
             controllerSo.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(controller);
 
             systems.AddComponent<HighlightDirector>();
             systems.AddComponent<FeedbackAudioPlayer>();
@@ -529,6 +608,7 @@ namespace VRTraining.EditorTools
             systems.AddComponent<DualInputUiBootstrap>();
             systems.AddComponent<InteractableResetService>();
             systems.AddComponent<UiFontBootstrap>();
+            systems.AddComponent<XrInteractionBootstrap>();
 
             // On-screen controls hint (readable, not a gameplay blocker).
             var hint = CreateWorldCanvas("ControlsHint", new Vector3(0f, 2.55f, -3.5f), new Vector2(1100, 180), 0.0024f, raycastTarget: false);
@@ -587,14 +667,33 @@ namespace VRTraining.EditorTools
             infoRt.sizeDelta = new Vector2(860, 220);
             var infoBg = infoGo.AddComponent<Image>();
             infoBg.color = new Color(0.08f, 0.1f, 0.14f, 0.85f);
+            infoBg.raycastTarget = false;
             var infoTitle = CreateUiText(infoGo.transform, "InfoTitle", "", 34, new Vector2(0, 70), new Vector2(820, 50), TextAnchor.MiddleCenter);
+            infoTitle.raycastTarget = false;
             var infoBody = CreateUiText(infoGo.transform, "InfoBody", "", 28, new Vector2(0, -20), new Vector2(820, 140), TextAnchor.UpperCenter);
+            infoBody.raycastTarget = false;
             var infoPanel = infoGo.AddComponent<ScenarioInfoPanel>();
             var infoSo = new SerializedObject(infoPanel);
             infoSo.FindProperty("canvasGroup").objectReferenceValue = infoGo.GetComponent<CanvasGroup>();
             infoSo.FindProperty("titleText").objectReferenceValue = infoTitle;
             infoSo.FindProperty("bodyText").objectReferenceValue = infoBody;
             infoSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // Persistent step status strip (TZ: show progress / statuses during run).
+            var progressGo = new GameObject("StepProgress", typeof(RectTransform));
+            progressGo.transform.SetParent(hudCanvas.transform, false);
+            var progressRt = progressGo.GetComponent<RectTransform>();
+            progressRt.anchoredPosition = new Vector2(0f, -130f);
+            progressRt.sizeDelta = new Vector2(820, 90);
+            var progressText = CreateUiText(progressGo.transform, "ProgressText", "", 22, Vector2.zero, new Vector2(800, 80), TextAnchor.UpperLeft);
+            progressText.raycastTarget = false;
+            var progressHud = progressGo.AddComponent<StepProgressHud>();
+            var progressSo = new SerializedObject(progressHud);
+            progressSo.FindProperty("hudText").objectReferenceValue = progressText;
+            progressSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // Simple FPS crosshair for look-aim (LMB / E / T).
+            CreateCrosshair(cam);
 
             var resultsCanvas = CreateWorldCanvas("ResultsCanvas", new Vector3(0f, 1.7f, 1.5f), new Vector2(1100, 900), 0.0026f);
             var resultsPanelGo = CreatePanel(resultsCanvas.transform, "ResultsPanel", Vector2.zero, new Vector2(1000, 820));
@@ -618,7 +717,44 @@ namespace VRTraining.EditorTools
             resultsCg.blocksRaycasts = false;
 
             CreateEventSystem();
+            EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenesPath + "/Training.unity");
+
+            // Post-save verification: scenario reference must not be null in YAML.
+            var savedController = Object.FindAnyObjectByType<ScenarioController>();
+            if (savedController == null || savedController.Scenario == null)
+            {
+                // Force-write via reopen if SerializedObject dropped the ref.
+                var sceneAsset = EditorSceneManager.OpenScene(ScenesPath + "/Training.unity");
+                var ctrl = Object.FindAnyObjectByType<ScenarioController>();
+                var so = new SerializedObject(ctrl);
+                so.FindProperty("scenario").objectReferenceValue =
+                    AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(SoPath + "/TrainingScenario.asset");
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(ctrl);
+                EditorSceneManager.MarkSceneDirty(sceneAsset);
+                EditorSceneManager.SaveScene(sceneAsset);
+            }
+        }
+
+        private static void CreateCrosshair(Camera cam)
+        {
+            if (cam == null)
+                return;
+
+            var canvasGo = new GameObject("CrosshairCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
+            canvasGo.transform.SetParent(cam.transform, false);
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 100;
+            var dot = new GameObject("Dot", typeof(RectTransform), typeof(Image));
+            dot.transform.SetParent(canvasGo.transform, false);
+            var rt = dot.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(8f, 8f);
+            rt.anchoredPosition = Vector2.zero;
+            var img = dot.GetComponent<Image>();
+            img.color = new Color(1f, 1f, 1f, 0.85f);
+            img.raycastTarget = false;
         }
 
         private static void SetupBuildSettings()
@@ -711,10 +847,15 @@ namespace VRTraining.EditorTools
 
         private static GameObject CreateZone(string id, Vector3 pos, Vector3 size, Material mat, string labelOverride = null)
         {
-            var go = CreatePrimitive(PrimitiveType.Cube, "Zone_" + id, pos, size, mat);
+            // Visual pad on the floor + tall trigger volume for CharacterController overlap.
+            var go = CreatePrimitive(PrimitiveType.Cube, "Zone_" + id, new Vector3(pos.x, 0.05f, pos.z), new Vector3(size.x, 0.1f, size.z), mat);
             Object.DestroyImmediate(go.GetComponent<Collider>());
             var box = go.AddComponent<BoxCollider>();
             box.isTrigger = true;
+            // Expand trigger upward in local space (object scale already applied by Unity collider size).
+            box.center = new Vector3(0f, 5f, 0f);
+            box.size = new Vector3(1f, 10f, 1f);
+
             var zone = go.AddComponent<InteractionZone>();
             var so = new SerializedObject(zone);
             so.FindProperty("targetId").stringValue = id;
@@ -724,11 +865,10 @@ namespace VRTraining.EditorTools
             oSo.FindProperty("targetId").stringValue = id;
             oSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // Label uses its own unscaled world canvas — TextMesh under scaled zone becomes a "line".
             var label = string.IsNullOrEmpty(labelOverride)
                 ? id.Replace("zone_", string.Empty).ToUpperInvariant()
                 : labelOverride;
-            var canvas = CreateWorldCanvas("Label_" + id, pos + Vector3.up * 1.35f, new Vector2(520, 120), 0.003f, raycastTarget: false);
+            var canvas = CreateWorldCanvas("Label_" + id, new Vector3(pos.x, 1.35f, pos.z), new Vector2(520, 120), 0.003f, raycastTarget: false);
             CreateUiText(canvas.transform, "Text", label, 48, Vector2.zero, new Vector2(500, 100), TextAnchor.MiddleCenter);
             return go;
         }

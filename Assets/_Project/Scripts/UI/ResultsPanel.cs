@@ -96,6 +96,9 @@ namespace VRTraining.UI
         private void OnRestart()
         {
             SetVisible(false);
+            var reset = FindAnyObjectByType<InteractableResetService>();
+            reset?.ResetAllInteractables();
+
             if (scenarioController != null)
             {
                 scenarioController.RestartScenario();

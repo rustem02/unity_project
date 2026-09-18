@@ -27,6 +27,18 @@ namespace VRTraining.Scenario.Runtime
 
         public bool IsRunning => _isRunning;
 
+        private void Awake()
+        {
+            // Builder sometimes fails to serialize SO refs into a brand-new scene YAML.
+            // Resources fallback keeps Play Mode / builds working.
+            if (scenario == null)
+            {
+                scenario = Resources.Load<ScenarioDefinition>("TrainingScenario");
+                if (scenario == null)
+                    Debug.LogWarning("[ScenarioController] No scenario assigned and Resources/TrainingScenario missing.");
+            }
+        }
+
         private void OnEnable()
         {
             EventBus.Subscribe<PlayerActionEvent>(OnPlayerAction);

@@ -16,13 +16,19 @@ namespace VRTraining.Highlight
         private void OnEnable()
         {
             EventBus.Subscribe<HighlightTargetsChangedEvent>(OnTargetsChanged);
-            EventBus.Subscribe<ScenarioCompletedEvent>(_ => ClearAll());
+            EventBus.Subscribe<ScenarioCompletedEvent>(OnScenarioCompleted);
             RebuildIndex();
         }
 
         private void OnDisable()
         {
             EventBus.Unsubscribe<HighlightTargetsChangedEvent>(OnTargetsChanged);
+            EventBus.Unsubscribe<ScenarioCompletedEvent>(OnScenarioCompleted);
+        }
+
+        private void OnScenarioCompleted(ScenarioCompletedEvent _)
+        {
+            ClearAll();
         }
 
         public void RebuildIndex()
