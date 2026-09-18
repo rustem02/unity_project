@@ -70,3 +70,6 @@ crashlytics-build.properties
 .idea/
 *.DotSettings.user
 .vscode/
+
+*.pdf
+tz.md
