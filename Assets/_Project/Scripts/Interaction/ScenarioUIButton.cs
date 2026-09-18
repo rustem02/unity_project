@@ -7,13 +7,16 @@ namespace VRTraining.Interaction
 {
     /// <summary>
     /// UI button that reports PressUIButton with a stable target id.
-    /// Works with mouse and XR UI ray interactors.
+    /// Supports mouse, look-aim LMB, and XR UI rays. Highlights when expected.
     /// </summary>
     [RequireComponent(typeof(Button))]
     public class ScenarioUIButton : MonoBehaviour, IHighlightable
     {
         [SerializeField] private string targetId = "ui_button";
         [SerializeField] private Button button;
+        [SerializeField] private Image targetImage;
+        [SerializeField] private Color normalColor = new Color(0.2f, 0.45f, 0.75f, 1f);
+        [SerializeField] private Color highlightColor = new Color(0.25f, 0.9f, 0.55f, 1f);
 
         public string TargetId => targetId;
 
@@ -21,6 +24,10 @@ namespace VRTraining.Interaction
         {
             if (button == null)
                 button = GetComponent<Button>();
+            if (targetImage == null)
+                targetImage = GetComponent<Image>();
+            if (targetImage != null)
+                normalColor = targetImage.color;
         }
 
         private void OnEnable()
@@ -38,6 +45,12 @@ namespace VRTraining.Interaction
             ActionPublisher.Publish(ActionType.PressUIButton, targetId);
         }
 
-        public void SetHighlighted(bool highlighted) { }
+        public void SetHighlighted(bool highlighted)
+        {
+            if (targetImage == null)
+                targetImage = GetComponent<Image>();
+            if (targetImage != null)
+                targetImage.color = highlighted ? highlightColor : normalColor;
+        }
     }
 }

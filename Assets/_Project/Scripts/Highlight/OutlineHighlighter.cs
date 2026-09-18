@@ -25,6 +25,7 @@ namespace VRTraining.Highlight
         private Color[] _originalColors;
 
         public string TargetId => targetId;
+        public bool IsHighlighted => _highlighted;
 
         private void Awake()
         {

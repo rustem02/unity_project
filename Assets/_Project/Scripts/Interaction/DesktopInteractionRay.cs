@@ -1,5 +1,8 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using VRTraining.Highlight;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -7,19 +10,20 @@ using UnityEngine.InputSystem;
 namespace VRTraining.Interaction
 {
     /// <summary>
-    /// Desktop mouse/keyboard click + grab.
-    /// Prefers interactables over furniture; uses a small sphere cast for forgiveness.
+    /// Desktop click / grab / world-UI press.
+    /// Look-mode (RMB / locked cursor) aims from screen center so LMB can hit world buttons.
+    /// Prefers currently highlighted targets to avoid grabbing distractors.
     /// </summary>
     public class DesktopInteractionRay : MonoBehaviour
     {
         [SerializeField] private Camera rayCamera;
         [SerializeField] private float maxDistance = 14f;
-        [SerializeField] private float aimRadius = 0.12f;
+        [SerializeField] private float aimRadius = 0.07f;
         [SerializeField] private LayerMask interactableMask = ~0;
         [SerializeField] private KeyCode grabKey = KeyCode.E;
-        [SerializeField] private bool showDebugRay;
 
-        private readonly RaycastHit[] _hits = new RaycastHit[24];
+        private readonly RaycastHit[] _hits = new RaycastHit[32];
+        private readonly List<RaycastResult> _uiHits = new List<RaycastResult>(16);
 
         private void Awake()
         {
@@ -35,7 +39,11 @@ namespace VRTraining.Interaction
                 return;
 
             if (WasLeftClick() && !IsBlockingScreenUi())
-                TryPrimaryInteract();
+            {
+                // UI first — otherwise players get stuck on PressUIButton steps in look-mode.
+                if (!TryClickWorldUi())
+                    TryPrimaryInteract();
+            }
 
             if (WasPressedThisFrame(grabKey))
                 TryGrab();
@@ -63,8 +71,49 @@ namespace VRTraining.Interaction
         }
 
         /// <summary>
-        /// Sphere-cast along aim ray and prefer Clickable/Grabbable over tables/walls.
+        /// Click world-space scenario buttons via EventSystem using the same aim as gameplay.
         /// </summary>
+        private bool TryClickWorldUi()
+        {
+            if (EventSystem.current == null)
+                return false;
+
+            _uiHits.Clear();
+            var eventData = new PointerEventData(EventSystem.current)
+            {
+                position = GetAimScreenPosition()
+            };
+            EventSystem.current.RaycastAll(eventData, _uiHits);
+
+            for (var i = 0; i < _uiHits.Count; i++)
+            {
+                var go = _uiHits[i].gameObject;
+                var canvas = go.GetComponentInParent<Canvas>();
+                if (canvas == null || canvas.renderMode != RenderMode.WorldSpace)
+                    continue;
+
+                var scenarioBtn = go.GetComponentInParent<ScenarioUIButton>();
+                if (scenarioBtn != null)
+                {
+                    var btn = scenarioBtn.GetComponent<Button>();
+                    if (btn != null && btn.interactable)
+                    {
+                        btn.onClick.Invoke();
+                        return true;
+                    }
+                }
+
+                var button = go.GetComponentInParent<Button>();
+                if (button != null && button.interactable)
+                {
+                    button.onClick.Invoke();
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private bool TryPickInteractable(out ClickableInteractable clickable, out GrabbableInteractable grabbable)
         {
             clickable = null;
@@ -74,33 +123,15 @@ namespace VRTraining.Interaction
             var count = Physics.SphereCastNonAlloc(
                 ray, aimRadius, _hits, maxDistance, interactableMask, QueryTriggerInteraction.Ignore);
             if (count <= 0)
-            {
-                // Fallback thin ray for precision.
                 count = Physics.RaycastNonAlloc(
                     ray, _hits, maxDistance, interactableMask, QueryTriggerInteraction.Ignore);
-            }
-
             if (count <= 0)
                 return false;
 
-            // Sort by distance (SphereCastNonAlloc is unsorted).
-            for (var i = 0; i < count - 1; i++)
-            {
-                for (var j = i + 1; j < count; j++)
-                {
-                    if (_hits[j].distance < _hits[i].distance)
-                    {
-                        var tmp = _hits[i];
-                        _hits[i] = _hits[j];
-                        _hits[j] = tmp;
-                    }
-                }
-            }
-
             ClickableInteractable bestClick = null;
             GrabbableInteractable bestGrab = null;
-            var bestClickDist = float.MaxValue;
-            var bestGrabDist = float.MaxValue;
+            var bestClickScore = float.MinValue;
+            var bestGrabScore = float.MinValue;
 
             for (var i = 0; i < count; i++)
             {
@@ -108,44 +139,65 @@ namespace VRTraining.Interaction
                 if (col == null)
                     continue;
 
+                var distScore = -_hits[i].distance;
+
                 var c = col.GetComponentInParent<ClickableInteractable>();
-                if (c != null && _hits[i].distance < bestClickDist)
+                if (c != null)
                 {
-                    bestClick = c;
-                    bestClickDist = _hits[i].distance;
+                    var score = distScore + (IsHighlightedTarget(c.TargetId) ? 1000f : 0f);
+                    if (score > bestClickScore)
+                    {
+                        bestClick = c;
+                        bestClickScore = score;
+                    }
                 }
 
                 var g = col.GetComponentInParent<GrabbableInteractable>();
-                if (g != null && _hits[i].distance < bestGrabDist)
+                if (g != null)
                 {
-                    bestGrab = g;
-                    bestGrabDist = _hits[i].distance;
+                    var score = distScore + (IsHighlightedTarget(g.TargetId) ? 1000f : 0f);
+                    if (score > bestGrabScore)
+                    {
+                        bestGrab = g;
+                        bestGrabScore = score;
+                    }
                 }
             }
 
             clickable = bestClick;
             grabbable = bestGrab;
+            return clickable != null || grabbable != null;
+        }
 
-            if (showDebugRay)
+        private static bool IsHighlightedTarget(string targetId)
+        {
+            if (string.IsNullOrEmpty(targetId))
+                return false;
+
+            var highlighters = FindObjectsByType<OutlineHighlighter>();
+            for (var i = 0; i < highlighters.Length; i++)
             {
-                Debug.DrawRay(ray.origin, ray.direction * maxDistance, Color.cyan, 0.35f);
-                if (clickable != null)
-                    Debug.Log($"[DesktopRay] click -> {clickable.TargetId}");
-                else if (grabbable != null)
-                    Debug.Log($"[DesktopRay] grab -> {grabbable.TargetId}");
+                var h = highlighters[i];
+                if (h != null && h.IsHighlighted &&
+                    string.Equals(h.TargetId, targetId, System.StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
 
-            return clickable != null || grabbable != null;
+            return false;
         }
 
         private Ray GetAimRay()
         {
-            // RMB look / locked cursor → aim by look direction (FPS crosshair).
-            // Free cursor → aim by mouse pointer.
             if (IsLookMode())
                 return rayCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-
             return rayCamera.ScreenPointToRay(GetMousePosition());
+        }
+
+        private Vector2 GetAimScreenPosition()
+        {
+            if (IsLookMode())
+                return new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+            return GetMousePosition();
         }
 
         private static bool IsLookMode()
@@ -208,13 +260,16 @@ namespace VRTraining.Interaction
             if (EventSystem.current == null)
                 return false;
 
-            var results = new System.Collections.Generic.List<RaycastResult>();
+            var results = new List<RaycastResult>();
             var eventData = new PointerEventData(EventSystem.current) { position = GetMousePosition() };
             EventSystem.current.RaycastAll(eventData, results);
             for (var i = 0; i < results.Count; i++)
             {
                 var canvas = results[i].gameObject.GetComponentInParent<Canvas>();
-                if (canvas != null && canvas.renderMode != RenderMode.WorldSpace)
+                // Only true overlay HUD blocks gameplay — never Crosshair (no raycast) / world UI.
+                if (canvas != null &&
+                    canvas.renderMode == RenderMode.ScreenSpaceOverlay &&
+                    canvas.name != "CrosshairCanvas")
                     return true;
             }
 

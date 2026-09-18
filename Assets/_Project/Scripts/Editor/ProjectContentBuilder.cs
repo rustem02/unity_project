@@ -632,8 +632,9 @@ namespace VRTraining.EditorTools
             // Wrong zone distractor
             CreateZone("zone_wrong", new Vector3(-7f, 0.05f, -2f), new Vector3(1.8f, 0.1f, 1.8f), mats["Zone"], "Служебка");
 
-            var passport = CreateInteractableCube("passport", new Vector3(-4f, 0.98f, 2f), new Vector3(0.35f, 0.08f, 0.45f), mats["Document"], grab: true);
-            var wrongPaper = CreateInteractableCube("wrong_paper", new Vector3(-3.45f, 0.98f, 2.15f), new Vector3(0.3f, 0.06f, 0.38f), mats["Panel"], grab: true);
+            var passport = CreateInteractableCube("passport", new Vector3(-4.25f, 0.98f, 2.0f), new Vector3(0.38f, 0.1f, 0.48f), mats["Document"], grab: true);
+            // Distractor kept clearly apart so sphere-aim does not steal the passport grab.
+            var wrongPaper = CreateInteractableCube("wrong_paper", new Vector3(-3.2f, 0.98f, 1.55f), new Vector3(0.28f, 0.06f, 0.36f), mats["Panel"], grab: true);
 
             var bag = CreateInteractableCube("suspicious_bag", new Vector3(3.3f, 1.05f, 2f), new Vector3(0.5f, 0.35f, 0.55f), mats["Accent"], click: true);
             var decoy = CreateInteractableCube("decoy_box", new Vector3(3.9f, 1.0f, 2.2f), new Vector3(0.35f, 0.3f, 0.35f), mats["Wall"], click: true);

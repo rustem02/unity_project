@@ -47,14 +47,19 @@ namespace VRTraining.VR
             if (!enableMouseLook || headYawSource == null)
                 return;
 
+            // Always look while cursor is locked; RMB also toggles lock. Escape unlocks.
+            // Avoid requiring RMB to be held after lock — that felt like "ПКМ broken" mid-scenario.
             if (WasPressedThisFrame(KeyCode.Escape))
                 Cursor.lockState = CursorLockMode.None;
 
-            var looking = IsMouseButtonHeld(1) || Cursor.lockState == CursorLockMode.Locked;
             if (WasMouseButtonPressed(1))
-                Cursor.lockState = CursorLockMode.Locked;
+            {
+                Cursor.lockState = Cursor.lockState == CursorLockMode.Locked
+                    ? CursorLockMode.None
+                    : CursorLockMode.Locked;
+            }
 
-            if (!looking)
+            if (Cursor.lockState != CursorLockMode.Locked)
                 return;
 
             var delta = GetMouseDelta() * lookSensitivity;
