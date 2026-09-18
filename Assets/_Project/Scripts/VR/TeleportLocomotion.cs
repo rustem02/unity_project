@@ -1,17 +1,23 @@
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace VRTraining.VR
 {
     /// <summary>
-    /// Simple point-and-teleport for VR/desktop: hold T and release to blink to aim point.
+    /// Point-and-teleport: hold T, aim with look/mouse, release to blink.
+    /// Works with CharacterController (temporarily disables it while moving the root).
     /// </summary>
     public class TeleportLocomotion : MonoBehaviour
     {
         [SerializeField] private Transform playerRoot;
         [SerializeField] private Camera aimCamera;
+        [SerializeField] private CharacterController characterController;
         [SerializeField] private LayerMask groundMask = ~0;
-        [SerializeField] private float maxDistance = 12f;
+        [SerializeField] private float maxDistance = 14f;
         [SerializeField] private KeyCode teleportKey = KeyCode.T;
+        [SerializeField] private bool useMouseAim = true;
         [SerializeField] private LineRenderer previewLine;
         [SerializeField] private Color validColor = new Color(0.2f, 0.9f, 0.5f, 0.8f);
         [SerializeField] private Color invalidColor = new Color(0.9f, 0.2f, 0.2f, 0.8f);
@@ -25,6 +31,8 @@ namespace VRTraining.VR
                 playerRoot = transform;
             if (aimCamera == null)
                 aimCamera = Camera.main;
+            if (characterController == null)
+                characterController = GetComponent<CharacterController>();
             EnsureLine();
         }
 
@@ -37,29 +45,42 @@ namespace VRTraining.VR
             go.transform.SetParent(transform, false);
             previewLine = go.AddComponent<LineRenderer>();
             previewLine.positionCount = 2;
-            previewLine.startWidth = 0.02f;
-            previewLine.endWidth = 0.02f;
-            previewLine.material = new Material(Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color"));
+            previewLine.startWidth = 0.03f;
+            previewLine.endWidth = 0.03f;
+            var shader = Shader.Find("Universal Render Pipeline/Unlit")
+                         ?? Shader.Find("Sprites/Default")
+                         ?? Shader.Find("Unlit/Color");
+            previewLine.material = new Material(shader);
             previewLine.enabled = false;
         }
 
         private void Update()
         {
             if (aimCamera == null)
+                aimCamera = Camera.main;
+            if (aimCamera == null)
                 return;
 
-            if (Input.GetKey(teleportKey))
+            var held = IsKeyHeld(teleportKey);
+            var released = WasKeyReleased(teleportKey);
+
+            if (held)
             {
                 UpdateAim();
                 previewLine.enabled = true;
                 previewLine.startColor = previewLine.endColor = _hasTarget ? validColor : invalidColor;
+                if (previewLine.material != null && previewLine.material.HasProperty("_BaseColor"))
+                    previewLine.material.SetColor("_BaseColor", _hasTarget ? validColor : invalidColor);
                 previewLine.SetPosition(0, aimCamera.transform.position);
-                previewLine.SetPosition(1, _hasTarget ? _targetPoint : aimCamera.transform.position + aimCamera.transform.forward * maxDistance);
+                previewLine.SetPosition(1,
+                    _hasTarget
+                        ? _targetPoint
+                        : aimCamera.transform.position + GetAimDirection() * maxDistance);
             }
-            else if (Input.GetKeyUp(teleportKey))
+            else if (released)
             {
                 if (_hasTarget)
-                    playerRoot.position = _targetPoint + Vector3.up * 0.05f;
+                    TeleportTo(_targetPoint);
                 previewLine.enabled = false;
                 _hasTarget = false;
             }
@@ -69,18 +90,74 @@ namespace VRTraining.VR
             }
         }
 
-        private void UpdateAim()
+        private void TeleportTo(Vector3 point)
         {
-            var ray = new Ray(aimCamera.transform.position, aimCamera.transform.forward);
-            if (Physics.Raycast(ray, out var hit, maxDistance, groundMask))
+            var destination = point + Vector3.up * 0.08f;
+            if (characterController != null)
             {
-                _hasTarget = true;
-                _targetPoint = hit.point;
+                characterController.enabled = false;
+                playerRoot.position = destination;
+                characterController.enabled = true;
             }
             else
             {
-                _hasTarget = false;
+                playerRoot.position = destination;
             }
+        }
+
+        private void UpdateAim()
+        {
+            var ray = new Ray(aimCamera.transform.position, GetAimDirection());
+            if (Physics.Raycast(ray, out var hit, maxDistance, groundMask, QueryTriggerInteraction.Ignore))
+            {
+                // Prefer roughly horizontal surfaces (floor / tables), reject steep walls.
+                if (Vector3.Dot(hit.normal, Vector3.up) > 0.35f)
+                {
+                    _hasTarget = true;
+                    _targetPoint = hit.point;
+                    return;
+                }
+            }
+
+            _hasTarget = false;
+        }
+
+        private Vector3 GetAimDirection()
+        {
+            if (useMouseAim)
+            {
+                var mouseRay = aimCamera.ScreenPointToRay(GetMousePosition());
+                return mouseRay.direction;
+            }
+
+            return aimCamera.transform.forward;
+        }
+
+        private static Vector2 GetMousePosition()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Mouse.current != null)
+                return Mouse.current.position.ReadValue();
+#endif
+            return Input.mousePosition;
+        }
+
+        private static bool IsKeyHeld(KeyCode key)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && key == KeyCode.T)
+                return Keyboard.current.tKey.isPressed;
+#endif
+            return Input.GetKey(key);
+        }
+
+        private static bool WasKeyReleased(KeyCode key)
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && key == KeyCode.T)
+                return Keyboard.current.tKey.wasReleasedThisFrame;
+#endif
+            return Input.GetKeyUp(key);
         }
     }
 }

@@ -59,8 +59,7 @@ namespace VRTraining.EditorTools
             if (!UrpProjectSetup.EnsureUrpConfigured())
                 throw new System.Exception("URP pipeline was not configured. Materials would render magenta.");
 
-            _uiFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
-                      ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            _uiFont = CreateCyrillicFont();
             var mats = CreateMaterials();
             var scenario = CreateScenarioAsset();
             BuildLobbyScene(mats);
@@ -427,9 +426,25 @@ namespace VRTraining.EditorTools
 
             systems.AddComponent<HighlightDirector>();
             systems.AddComponent<FeedbackAudioPlayer>();
-            systems.AddComponent<DesktopInteractionRay>();
+            var desktopRay = systems.AddComponent<DesktopInteractionRay>();
+            var raySo = new SerializedObject(desktopRay);
+            var playerCam = Object.FindAnyObjectByType<Camera>();
+            if (playerCam != null)
+                raySo.FindProperty("rayCamera").objectReferenceValue = playerCam;
+            raySo.ApplyModifiedPropertiesWithoutUndo();
             systems.AddComponent<DualInputUiBootstrap>();
             systems.AddComponent<InteractableResetService>();
+
+            // On-screen controls hint (readable, not a gameplay blocker).
+            var hint = CreateWorldCanvas("ControlsHint", new Vector3(0f, 2.6f, -3.2f), new Vector2(1100, 220), 0.0018f, raycastTarget: false);
+            CreateUiText(
+                hint.transform,
+                "Hint",
+                "WASD - ходьба | ПКМ - обзор | T - телепорт | ЛКМ - клик | E - взять",
+                30,
+                Vector2.zero,
+                new Vector2(1050, 180),
+                TextAnchor.MiddleCenter);
 
             // Tables / props
             var docsTable = CreatePrimitive(PrimitiveType.Cube, "DocumentsTable", new Vector3(-4f, 0.4f, 2f), new Vector3(1.6f, 0.8f, 0.9f), mats["Table"]);
@@ -462,7 +477,7 @@ namespace VRTraining.EditorTools
             CreateScenarioButton(finishCanvas.transform, "FinishBtn", "Завершить", "btn_finish", new Vector2(0, -30), new Vector2(420, 90));
 
             // Info + results + HUD
-            var hudCanvas = CreateWorldCanvas("HudCanvas", new Vector3(0f, 2.2f, 0f), new Vector2(900, 260), 0.0015f);
+            var hudCanvas = CreateWorldCanvas("HudCanvas", new Vector3(0f, 2.2f, 0f), new Vector2(900, 260), 0.0015f, raycastTarget: false);
             hudCanvas.transform.SetParent(Camera.main != null ? Camera.main.transform : null, false);
             // Attach HUD to player camera if present
             var cam = Object.FindAnyObjectByType<Camera>();
@@ -595,6 +610,7 @@ namespace VRTraining.EditorTools
             var teleSo = new SerializedObject(teleport);
             teleSo.FindProperty("playerRoot").objectReferenceValue = player.transform;
             teleSo.FindProperty("aimCamera").objectReferenceValue = cam;
+            teleSo.FindProperty("characterController").objectReferenceValue = controller;
             teleSo.ApplyModifiedPropertiesWithoutUndo();
 
             return player;
@@ -615,20 +631,10 @@ namespace VRTraining.EditorTools
             oSo.FindProperty("targetId").stringValue = id;
             oSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // Readable floating label above the zone.
-            var labelGo = new GameObject("Label");
-            labelGo.transform.SetParent(go.transform, false);
-            labelGo.transform.localPosition = new Vector3(0f, 12f, 0f);
-            labelGo.transform.localScale = Vector3.one * 0.15f;
-            var tm = labelGo.AddComponent<TextMesh>();
-            if (_uiFont != null)
-                tm.font = _uiFont;
-            tm.text = id.Replace("zone_", "").ToUpperInvariant();
-            tm.fontSize = 48;
-            tm.anchor = TextAnchor.MiddleCenter;
-            tm.alignment = TextAlignment.Center;
-            tm.color = Color.white;
-            tm.characterSize = 0.15f;
+            // Label uses its own unscaled world canvas — TextMesh under scaled zone becomes a "line".
+            var label = id.Replace("zone_", string.Empty).ToUpperInvariant();
+            var canvas = CreateWorldCanvas("Label_" + id, pos + Vector3.up * 1.35f, new Vector2(520, 120), 0.0025f, raycastTarget: false);
+            CreateUiText(canvas.transform, "Text", label, 48, Vector2.zero, new Vector2(500, 100), TextAnchor.MiddleCenter);
             return go;
         }
 
@@ -675,10 +681,14 @@ namespace VRTraining.EditorTools
             return go;
         }
 
-        private static Canvas CreateWorldCanvas(string name, Vector3 pos, Vector2 size, float scale)
+        private static Canvas CreateWorldCanvas(string name, Vector3 pos, Vector2 size, float scale, bool raycastTarget = true)
         {
-            var go = new GameObject(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            var go = new GameObject(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
+            if (raycastTarget)
+                go.AddComponent<GraphicRaycaster>();
             go.transform.position = pos;
+            // Face spawn side (-Z) so text is readable when entering the room.
+            go.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
             go.transform.localScale = Vector3.one * scale;
             var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
@@ -698,6 +708,19 @@ namespace VRTraining.EditorTools
             return go;
         }
 
+        private static Font CreateCyrillicFont()
+        {
+            // Builtin LegacyRuntime often lacks Cyrillic → glyphs become empty strokes/"lines".
+            var os = Font.CreateDynamicFontFromOSFont(
+                new[] { "Segoe UI", "Arial", "Tahoma", "Microsoft Sans Serif", "DejaVu Sans" },
+                64);
+            if (os != null)
+                return os;
+
+            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+                   ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+        }
+
         private static Text CreateUiText(
             Transform parent, string name, string text, int fontSize, Vector2 pos, Vector2 size, TextAnchor align)
         {
@@ -715,6 +738,7 @@ namespace VRTraining.EditorTools
             ui.color = Color.white;
             ui.horizontalOverflow = HorizontalWrapMode.Wrap;
             ui.verticalOverflow = VerticalWrapMode.Overflow;
+            ui.supportRichText = false;
             return ui;
         }
 

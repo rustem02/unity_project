@@ -5,26 +5,28 @@ VR-тренировка по сценарию с группами шагов: л
 ## Быстрый старт
 
 1. Откройте проект в **Unity 6000.6.2f1**.
-2. Дождитесь импорта пакетов (URP + VR Feature Set / XR Interaction Toolkit).
-3. Если сцены уже есть (`Assets/_Project/Scenes/Lobby.unity`, `Training.unity`) — откройте **Lobby** и Play.
-4. Если нужно пересобрать контент: меню **VR Training → Build Project Content**.
+2. Дождитесь импорта пакетов (URP + VR Feature Set).
+3. Откройте `Assets/_Project/Scenes/Lobby.unity` → Play.
+4. Если розовые материалы: **VR Training → Fix URP Pipeline**, затем **Build Project Content**.
 
 ### Управление (desktop / без гарнитуры)
 
-| Действие | Клавиши |
-|----------|---------|
-| Ходьба | WASD |
-| Обзор | ПКМ + мышь |
-| Телепорт | удерживать **T**, отпустить на точке |
-| Клик по объекту | ЛКМ |
-| Grab | **E** (луч на объект) |
-| UI | мышь / XR UI ray |
+| Действие | Управление |
+|----------|------------|
+| Ходьба | **WASD** / стрелки |
+| Обзор | удерживать **ПКМ** + мышь (или Lock Cursor) |
+| Телепорт | удерживать **T**, навести мышь на пол, отпустить |
+| Клик по объекту | **ЛКМ** по объекту |
+| Grab | навести мышь + **E** |
+| UI-кнопки | **ЛКМ** по кнопке |
+
+Важно: телепорт/клик/grab работают от **позиции мыши** (нужен обзор ПКМ, чтобы видеть цель). Зоны срабатывают при входе в подсвеченный триггер.
 
 ## Архитектура
 
-Системы связаны через тонкий typed **EventBus** (без DI-контейнеров): интеракции публикуют `PlayerActionEvent`, `ScenarioController` оценивает действие через `StepActionEvaluator` и шлёт события шага/группы/итога. Данные сценария — `ScenarioDefinition` (ScriptableObject): группы → шаги → ожидаемые действия (`ReachZone` / `Grab` / `Click` / `PressUIButton`). Подсветка идёт через `IHighlightable` + `OutlineHighlighter` (адаптер `HighlightPlusAdapter` для Highlight Plus), звук и UI подписаны на те же события.
+Системы связаны через typed **EventBus** (без DI): интеракции публикуют `PlayerActionEvent`, `ScenarioController` оценивает действие через `StepActionEvaluator` и шлёт события шага/группы/итога. Данные — `ScenarioDefinition` (ScriptableObject): группы → шаги → действия (`ReachZone` / `Grab` / `Click` / `PressUIButton`). Подсветка — `IHighlightable` + `OutlineHighlighter` (адаптер под Highlight Plus), звук и UI на тех же событиях.
 
-Нарушение порядка (действие более позднего шага) закрывает текущую группу: завершённые шаги сохраняют статус, остальные — `Skipped`. Неверный целевой объект текущего типа действия помечает шаг как `Failed`.
+Нарушение порядка закрывает группу: готовые шаги сохраняют статус, остальные — `Skipped`. Неверная цель текущего типа действия → `Failed`.
 
 ## Структура
 
@@ -32,11 +34,19 @@ VR-тренировка по сценарию с группами шагов: л
 Assets/_Project/
   Scripts/   Core, Scenario, Interaction, Highlight, Audio, UI, VR, Lobby, Editor
   Scenes/    Lobby, Training
-  Materials / ScriptableObjects / Prefabs / Audio / Tests
+  Materials / ScriptableObjects / Prefabs / Settings
 ```
 
-Сценарий по умолчанию — «Таможенный контроль»: 3 группы × 3 шага (документы → досмотр → выход), с отвлекающими зонами/объектами/кнопками для ошибок.
+Сценарий «Таможенный контроль»: 3 группы × 3 шага + отвлекающие зоны/объекты/кнопки.
+
+## Соответствие ТЗ
+
+- Лобби → Training, UI мышью
+- 3 группы × 3 шага, success/fail/skip, sequence violation
+- Действия: зона, grab, click, UI; нарушения неверных целей
+- Звук success/fail, подсветка целей, итоги Restart/Lobby
+- EventBus, SOLID, URP, примитивы, git-история, README
 
 ## Гибкая система сценариев (видение)
 
-Наиболее расширяемый вариант — граф шагов с условиями перехода (Success / Fail / SequenceBreak) и composition expected-actions через Strategy (`IActionCondition`), а контент хранить в JSON/SO с id-ссылками на сценические `InteractableBinding`. Тогда автор сценария не трогает код, а рантайм остаётся тем же: шина событий + чистый evaluator. Текущая реализация — линейный поднабор этой модели (3×3), достаточный для ТЗ и легко наращиваемый до графа без ломки интеракций.
+Граф шагов с переходами Success/Fail/SequenceBreak и Strategy для условий (`IActionCondition`), контент в JSON/SO со ссылками на `InteractableBinding`. Текущий линейный 3×3 — рабочий поднабор той же модели.
