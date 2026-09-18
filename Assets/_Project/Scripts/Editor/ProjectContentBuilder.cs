@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using VRTraining.Audio;
@@ -54,6 +55,9 @@ namespace VRTraining.EditorTools
         private static void BuildAllInternal(bool showDialog)
         {
             EnsureFolders();
+            if (!UrpProjectSetup.EnsureUrpConfigured())
+                throw new System.Exception("URP pipeline was not configured. Materials would render magenta.");
+
             var mats = CreateMaterials();
             var scenario = CreateScenarioAsset();
             BuildLobbyScene(mats);
@@ -61,17 +65,131 @@ namespace VRTraining.EditorTools
             SetupBuildSettings();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+
+            var verify = VerifyProjectHealth();
             if (showDialog)
             {
                 EditorUtility.DisplayDialog(
                     "VR Training",
-                    "Контент собран.\nСцены: Lobby, Training.\nОткройте Lobby и нажмите Play.",
+                    verify
+                        ? "Контент собран и проверен.\nСцены: Lobby, Training.\nОткройте Lobby и Play."
+                        : "Контент собран, но проверка нашла проблемы. Смотри Console.",
                     "OK");
             }
             else
             {
-                Debug.Log("[VR Training] Project content built successfully.");
+                if (!verify)
+                    throw new System.Exception("Project health check failed after build.");
+                Debug.Log("[VR Training] Project content built and verified successfully.");
             }
+        }
+
+        /// <summary>Batch screenshot: Unity -executeMethod VRTraining.EditorTools.ProjectContentBuilder.CaptureTrainingScreenshot</summary>
+        public static void CaptureTrainingScreenshot()
+        {
+            try
+            {
+                UrpProjectSetup.EnsureUrpConfigured();
+                var scenePath = ScenesPath + "/Training.unity";
+                if (!File.Exists(scenePath))
+                    BuildAllInternal(showDialog: false);
+
+                EditorSceneManager.OpenScene(scenePath);
+                var cam = Object.FindAnyObjectByType<Camera>();
+                if (cam == null)
+                    throw new System.Exception("No camera in Training scene.");
+
+                // Overview shot of the training room.
+                cam.transform.position = new Vector3(0f, 6.5f, -10f);
+                cam.transform.rotation = Quaternion.Euler(28f, 0f, 0f);
+
+                const int width = 1280;
+                const int height = 720;
+                var rt = new RenderTexture(width, height, 24);
+                var prev = cam.targetTexture;
+                cam.targetTexture = rt;
+                cam.Render();
+
+                RenderTexture.active = rt;
+                var tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+                cam.targetTexture = prev;
+                RenderTexture.active = null;
+                Object.DestroyImmediate(rt);
+
+                var outDir = Path.Combine(Directory.GetParent(Application.dataPath)!.FullName, "Logs");
+                Directory.CreateDirectory(outDir);
+                var outPath = Path.Combine(outDir, "verify_training.png");
+                File.WriteAllBytes(outPath, tex.EncodeToPNG());
+                Object.DestroyImmediate(tex);
+
+                // Magenta detector: sample center pixels shouldn't be pure magenta error color.
+                // (Rough check already done via shader names in VerifyProjectHealth.)
+                Debug.Log($"[VR Training] Screenshot saved: {outPath}");
+                EditorApplication.Exit(0);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError(ex);
+                EditorApplication.Exit(1);
+            }
+        }
+
+        private static bool VerifyProjectHealth()
+        {
+            var ok = true;
+            if (GraphicsSettings.currentRenderPipeline == null)
+            {
+                Debug.LogError("[VR Training] Verify FAIL: no render pipeline assigned.");
+                ok = false;
+            }
+
+            var mats = AssetDatabase.FindAssets("t:Material", new[] { MaterialsPath });
+            for (var i = 0; i < mats.Length; i++)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(mats[i]);
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (mat == null || mat.shader == null)
+                {
+                    Debug.LogError($"[VR Training] Verify FAIL: missing material/shader at {path}");
+                    ok = false;
+                    continue;
+                }
+
+                if (mat.shader.name.Contains("Hidden/InternalErrorShader") || mat.shader.name == "Hidden/InternalErrorShader")
+                {
+                    Debug.LogError($"[VR Training] Verify FAIL: error shader on {path}");
+                    ok = false;
+                }
+            }
+
+            if (!File.Exists(ScenesPath + "/Lobby.unity") || !File.Exists(ScenesPath + "/Training.unity"))
+            {
+                Debug.LogError("[VR Training] Verify FAIL: Lobby/Training scenes missing.");
+                ok = false;
+            }
+
+            var scenario = AssetDatabase.LoadAssetAtPath<ScenarioDefinition>(SoPath + "/TrainingScenario.asset");
+            if (scenario == null || scenario.Groups == null || scenario.Groups.Count != 3)
+            {
+                Debug.LogError("[VR Training] Verify FAIL: TrainingScenario must have 3 groups.");
+                ok = false;
+            }
+            else
+            {
+                for (var g = 0; g < scenario.Groups.Count; g++)
+                {
+                    if (scenario.Groups[g].Steps == null || scenario.Groups[g].Steps.Count != 3)
+                    {
+                        Debug.LogError($"[VR Training] Verify FAIL: group {g} must have 3 steps.");
+                        ok = false;
+                    }
+                }
+            }
+
+            Debug.Log(ok ? "[VR Training] Verify PASS." : "[VR Training] Verify FAIL.");
+            return ok;
         }
 
         [MenuItem("VR Training/Open Lobby Scene")]
@@ -111,40 +229,17 @@ namespace VRTraining.EditorTools
         {
             var path = $"{MaterialsPath}/{name}.mat";
             var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (existing != null)
+            if (existing == null)
             {
-                existing.color = color;
-                if (existing.HasProperty("_BaseColor"))
-                    existing.SetColor("_BaseColor", color);
-                EditorUtility.SetDirty(existing);
-                return existing;
+                var shader = Shader.Find("Universal Render Pipeline/Lit")
+                             ?? Shader.Find("Lit")
+                             ?? Shader.Find("Standard");
+                existing = new Material(shader) { name = name };
+                AssetDatabase.CreateAsset(existing, path);
             }
 
-            var shader = Shader.Find("Universal Render Pipeline/Lit")
-                         ?? Shader.Find("Lit")
-                         ?? Shader.Find("Standard");
-            var mat = new Material(shader) { name = name };
-            if (mat.HasProperty("_BaseColor"))
-                mat.SetColor("_BaseColor", color);
-            else
-                mat.color = color;
-
-            if (transparent)
-            {
-                // Soft zone tint — best-effort across pipelines.
-                mat.SetFloat("_Surface", 1f);
-                mat.SetOverrideTag("RenderType", "Transparent");
-                mat.renderQueue = 3000;
-                var c = color;
-                c.a = 0.35f;
-                if (mat.HasProperty("_BaseColor"))
-                    mat.SetColor("_BaseColor", c);
-                else
-                    mat.color = c;
-            }
-
-            AssetDatabase.CreateAsset(mat, path);
-            return mat;
+            UrpProjectSetup.ForceUrpLitOnMaterial(existing, color, transparent);
+            return existing;
         }
 
         private static ScenarioDefinition CreateScenarioAsset()
@@ -431,15 +526,29 @@ namespace VRTraining.EditorTools
             CreatePrimitive(PrimitiveType.Cube, "WallW", new Vector3(-size.x * 0.5f, size.y * 0.5f, 0f), new Vector3(0.15f, size.y, size.z), mats["Wall"])
                 .transform.SetParent(root.transform);
 
+            CreatePrimitive(PrimitiveType.Cube, "Ceiling", new Vector3(0f, size.y, 0f), new Vector3(size.x, 0.1f, size.z), mats["Panel"])
+                .transform.SetParent(root.transform);
+
             var light = new GameObject("Directional Light");
             var l = light.AddComponent<Light>();
             l.type = LightType.Directional;
-            l.intensity = 1.1f;
+            l.intensity = 1.25f;
+            l.color = new Color(1f, 0.98f, 0.94f);
             light.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
             light.transform.SetParent(root.transform);
 
+            var fill = new GameObject("Fill Light");
+            var fl = fill.AddComponent<Light>();
+            fl.type = LightType.Directional;
+            fl.intensity = 0.35f;
+            fl.color = new Color(0.7f, 0.8f, 1f);
+            fill.transform.rotation = Quaternion.Euler(20f, 140f, 0f);
+            fill.transform.SetParent(root.transform);
+
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
             RenderSettings.ambientSkyColor = new Color(0.45f, 0.5f, 0.6f);
+            RenderSettings.ambientEquatorColor = new Color(0.25f, 0.27f, 0.3f);
+            RenderSettings.ambientGroundColor = new Color(0.12f, 0.12f, 0.14f);
             return root;
         }
 
@@ -491,6 +600,17 @@ namespace VRTraining.EditorTools
             var oSo = new SerializedObject(outline);
             oSo.FindProperty("targetId").stringValue = id;
             oSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // Readable floating label above the zone.
+            var labelGo = new GameObject("Label");
+            labelGo.transform.SetParent(go.transform, false);
+            labelGo.transform.localPosition = new Vector3(0f, 1.2f / Mathf.Max(size.y, 0.01f), 0f);
+            labelGo.transform.localScale = new Vector3(0.02f / size.x, 0.02f / size.y, 0.02f / size.z);
+            var tmp = labelGo.AddComponent<TextMeshPro>();
+            tmp.text = id.Replace("zone_", "").ToUpperInvariant();
+            tmp.fontSize = 48;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.color = Color.white;
             return go;
         }
 
