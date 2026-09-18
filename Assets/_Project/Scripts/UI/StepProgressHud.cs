@@ -1,5 +1,5 @@
-using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 using VRTraining.Core.Events;
 using VRTraining.Scenario.Data;
 
@@ -10,7 +10,7 @@ namespace VRTraining.UI
     /// </summary>
     public class StepProgressHud : MonoBehaviour
     {
-        [SerializeField] private TextMeshProUGUI hudText;
+        [SerializeField] private Text hudText;
 
         private string _groupTitle = string.Empty;
         private readonly System.Collections.Generic.Dictionary<string, StepStatus> _statuses =
@@ -53,7 +53,7 @@ namespace VRTraining.UI
             var sb = new System.Text.StringBuilder();
             sb.AppendLine(_groupTitle);
             foreach (var pair in _statuses)
-                sb.AppendLine($"• {pair.Key}: {pair.Value}");
+                sb.AppendLine($"* {pair.Key}: {pair.Value}");
             hudText.text = sb.ToString();
         }
     }

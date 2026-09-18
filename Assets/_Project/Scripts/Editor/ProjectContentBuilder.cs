@@ -1,7 +1,6 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
 using System.IO;
-using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -31,6 +30,8 @@ namespace VRTraining.EditorTools
         private const string MaterialsPath = Root + "/Materials";
         private const string SoPath = Root + "/ScriptableObjects";
 
+        private static Font _uiFont;
+
         [MenuItem("VR Training/Build Project Content", priority = 0)]
         public static void BuildAll()
         {
@@ -58,6 +59,8 @@ namespace VRTraining.EditorTools
             if (!UrpProjectSetup.EnsureUrpConfigured())
                 throw new System.Exception("URP pipeline was not configured. Materials would render magenta.");
 
+            _uiFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+                      ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
             var mats = CreateMaterials();
             var scenario = CreateScenarioAsset();
             BuildLobbyScene(mats);
@@ -95,13 +98,21 @@ namespace VRTraining.EditorTools
                     BuildAllInternal(showDialog: false);
 
                 EditorSceneManager.OpenScene(scenePath);
+
+                // Hide end-of-run UI for a clean overview shot (Awake not run in edit-mode capture).
+                foreach (var canvas in Object.FindObjectsByType<Canvas>())
+                {
+                    if (canvas.name is "ResultsCanvas" or "HudCanvas")
+                        canvas.gameObject.SetActive(false);
+                }
+
                 var cam = Object.FindAnyObjectByType<Camera>();
                 if (cam == null)
                     throw new System.Exception("No camera in Training scene.");
 
-                // Overview shot of the training room.
-                cam.transform.position = new Vector3(0f, 6.5f, -10f);
-                cam.transform.rotation = Quaternion.Euler(28f, 0f, 0f);
+                // Overview from inside the room looking toward tables/zones.
+                cam.transform.position = new Vector3(0f, 2.4f, -4.2f);
+                cam.transform.rotation = Quaternion.Euler(15f, 0f, 0f);
 
                 const int width = 1280;
                 const int height = 720;
@@ -384,8 +395,8 @@ namespace VRTraining.EditorTools
 
             var canvas = CreateWorldCanvas("LobbyCanvas", new Vector3(0f, 1.6f, 2.5f), new Vector2(1200, 800), 0.0022f);
             var panel = CreatePanel(canvas.transform, "Panel", Vector2.zero, new Vector2(1100, 700));
-            CreateTmp(panel.transform, "Title", "VR TRAINING", 64, new Vector2(0, 220), new Vector2(1000, 100), TextAlignmentOptions.Center);
-            CreateTmp(panel.transform, "Subtitle", "Лобби · выберите действие", 36, new Vector2(0, 120), new Vector2(1000, 60), TextAlignmentOptions.Center);
+            CreateUiText(panel.transform, "Title", "VR TRAINING", 64, new Vector2(0, 220), new Vector2(1000, 100), TextAnchor.MiddleCenter);
+            CreateUiText(panel.transform, "Subtitle", "Лобби - выберите действие", 36, new Vector2(0, 120), new Vector2(1000, 60), TextAnchor.MiddleCenter);
 
             var startBtn = CreateUiButton(panel.transform, "StartButton", "Начать тренировку", new Vector2(0, -40), new Vector2(520, 100));
             var menu = canvas.gameObject.AddComponent<LobbyMenuController>();
@@ -442,12 +453,12 @@ namespace VRTraining.EditorTools
 
             // Scenario UI near documents
             var confirmCanvas = CreateWorldCanvas("ConfirmCanvas", new Vector3(-4f, 1.55f, 2.55f), new Vector2(600, 220), 0.0018f);
-            CreateTmp(confirmCanvas.transform, "Label", "Документы", 40, new Vector2(0, 60), new Vector2(560, 50), TextAlignmentOptions.Center);
+            CreateUiText(confirmCanvas.transform, "Label", "Документы", 40, new Vector2(0, 60), new Vector2(560, 50), TextAnchor.MiddleCenter);
             CreateScenarioButton(confirmCanvas.transform, "ConfirmBtn", "Подтвердить", "btn_confirm", new Vector2(0, -30), new Vector2(420, 90));
             CreateScenarioButton(confirmCanvas.transform, "WrongBtn", "Отклонить", "btn_reject", new Vector2(0, -130), new Vector2(420, 70));
 
             var finishCanvas = CreateWorldCanvas("FinishCanvas", new Vector3(0f, 1.55f, 6.1f), new Vector2(600, 220), 0.0018f);
-            CreateTmp(finishCanvas.transform, "Label", "Выход", 40, new Vector2(0, 60), new Vector2(560, 50), TextAlignmentOptions.Center);
+            CreateUiText(finishCanvas.transform, "Label", "Выход", 40, new Vector2(0, 60), new Vector2(560, 50), TextAnchor.MiddleCenter);
             CreateScenarioButton(finishCanvas.transform, "FinishBtn", "Завершить", "btn_finish", new Vector2(0, -30), new Vector2(420, 90));
 
             // Info + results + HUD
@@ -469,8 +480,8 @@ namespace VRTraining.EditorTools
             infoRt.sizeDelta = new Vector2(860, 220);
             var infoBg = infoGo.AddComponent<Image>();
             infoBg.color = new Color(0.08f, 0.1f, 0.14f, 0.85f);
-            var infoTitle = CreateTmp(infoGo.transform, "InfoTitle", "", 34, new Vector2(0, 70), new Vector2(820, 50), TextAlignmentOptions.Center);
-            var infoBody = CreateTmp(infoGo.transform, "InfoBody", "", 28, new Vector2(0, -20), new Vector2(820, 140), TextAlignmentOptions.Top);
+            var infoTitle = CreateUiText(infoGo.transform, "InfoTitle", "", 34, new Vector2(0, 70), new Vector2(820, 50), TextAnchor.MiddleCenter);
+            var infoBody = CreateUiText(infoGo.transform, "InfoBody", "", 28, new Vector2(0, -20), new Vector2(820, 140), TextAnchor.UpperCenter);
             var infoPanel = infoGo.AddComponent<ScenarioInfoPanel>();
             var infoSo = new SerializedObject(infoPanel);
             infoSo.FindProperty("canvasGroup").objectReferenceValue = infoGo.GetComponent<CanvasGroup>();
@@ -481,8 +492,8 @@ namespace VRTraining.EditorTools
             var resultsCanvas = CreateWorldCanvas("ResultsCanvas", new Vector3(0f, 1.7f, 1.5f), new Vector2(1100, 900), 0.002f);
             var resultsPanelGo = CreatePanel(resultsCanvas.transform, "ResultsPanel", Vector2.zero, new Vector2(1000, 820));
             var resultsCg = resultsPanelGo.AddComponent<CanvasGroup>();
-            var summary = CreateTmp(resultsPanelGo.transform, "Summary", "Итог", 42, new Vector2(0, 340), new Vector2(920, 60), TextAlignmentOptions.Center);
-            var details = CreateTmp(resultsPanelGo.transform, "Details", "", 28, new Vector2(0, 40), new Vector2(920, 520), TextAlignmentOptions.TopLeft);
+            var summary = CreateUiText(resultsPanelGo.transform, "Summary", "Итог", 42, new Vector2(0, 340), new Vector2(920, 60), TextAnchor.MiddleCenter);
+            var details = CreateUiText(resultsPanelGo.transform, "Details", "", 28, new Vector2(0, 40), new Vector2(920, 520), TextAnchor.UpperLeft);
             var restart = CreateUiButton(resultsPanelGo.transform, "Restart", "Попытаться ещё", new Vector2(-230, -330), new Vector2(400, 90));
             var lobby = CreateUiButton(resultsPanelGo.transform, "Lobby", "Возврат в Лобби", new Vector2(230, -330), new Vector2(400, 90));
             var results = resultsPanelGo.AddComponent<ResultsPanel>();
@@ -495,6 +506,9 @@ namespace VRTraining.EditorTools
             resultsSo.FindProperty("scenarioController").objectReferenceValue = controller;
             resultsSo.FindProperty("lobbySceneName").stringValue = "Lobby";
             resultsSo.ApplyModifiedPropertiesWithoutUndo();
+            resultsCg.alpha = 0f;
+            resultsCg.interactable = false;
+            resultsCg.blocksRaycasts = false;
 
             CreateEventSystem();
             EditorSceneManager.SaveScene(scene, ScenesPath + "/Training.unity");
@@ -604,13 +618,17 @@ namespace VRTraining.EditorTools
             // Readable floating label above the zone.
             var labelGo = new GameObject("Label");
             labelGo.transform.SetParent(go.transform, false);
-            labelGo.transform.localPosition = new Vector3(0f, 1.2f / Mathf.Max(size.y, 0.01f), 0f);
-            labelGo.transform.localScale = new Vector3(0.02f / size.x, 0.02f / size.y, 0.02f / size.z);
-            var tmp = labelGo.AddComponent<TextMeshPro>();
-            tmp.text = id.Replace("zone_", "").ToUpperInvariant();
-            tmp.fontSize = 48;
-            tmp.alignment = TextAlignmentOptions.Center;
-            tmp.color = Color.white;
+            labelGo.transform.localPosition = new Vector3(0f, 12f, 0f);
+            labelGo.transform.localScale = Vector3.one * 0.15f;
+            var tm = labelGo.AddComponent<TextMesh>();
+            if (_uiFont != null)
+                tm.font = _uiFont;
+            tm.text = id.Replace("zone_", "").ToUpperInvariant();
+            tm.fontSize = 48;
+            tm.anchor = TextAnchor.MiddleCenter;
+            tm.alignment = TextAlignment.Center;
+            tm.color = Color.white;
+            tm.characterSize = 0.15f;
             return go;
         }
 
@@ -680,21 +698,24 @@ namespace VRTraining.EditorTools
             return go;
         }
 
-        private static TextMeshProUGUI CreateTmp(
-            Transform parent, string name, string text, float fontSize, Vector2 pos, Vector2 size, TextAlignmentOptions align)
+        private static Text CreateUiText(
+            Transform parent, string name, string text, int fontSize, Vector2 pos, Vector2 size, TextAnchor align)
         {
             var go = new GameObject(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
             var rt = go.GetComponent<RectTransform>();
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
-            var tmp = go.AddComponent<TextMeshProUGUI>();
-            tmp.text = text;
-            tmp.fontSize = fontSize;
-            tmp.alignment = align;
-            tmp.color = Color.white;
-            tmp.textWrappingMode = TextWrappingModes.Normal;
-            return tmp;
+            var ui = go.AddComponent<Text>();
+            if (_uiFont != null)
+                ui.font = _uiFont;
+            ui.text = text;
+            ui.fontSize = fontSize;
+            ui.alignment = align;
+            ui.color = Color.white;
+            ui.horizontalOverflow = HorizontalWrapMode.Wrap;
+            ui.verticalOverflow = VerticalWrapMode.Overflow;
+            return ui;
         }
 
         private static Button CreateUiButton(Transform parent, string name, string label, Vector2 pos, Vector2 size)
@@ -705,8 +726,8 @@ namespace VRTraining.EditorTools
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
             go.GetComponent<Image>().color = new Color(0.2f, 0.45f, 0.75f, 1f);
-            var tmp = CreateTmp(go.transform, "Label", label, 34, Vector2.zero, size, TextAlignmentOptions.Center);
-            tmp.raycastTarget = false;
+            var ui = CreateUiText(go.transform, "Label", label, 34, Vector2.zero, size, TextAnchor.MiddleCenter);
+            ui.raycastTarget = false;
             return go.GetComponent<Button>();
         }
 

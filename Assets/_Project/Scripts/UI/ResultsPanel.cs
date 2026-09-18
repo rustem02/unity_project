@@ -1,5 +1,4 @@
 using System.Text;
-using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -15,8 +14,8 @@ namespace VRTraining.UI
     public class ResultsPanel : MonoBehaviour
     {
         [SerializeField] private CanvasGroup canvasGroup;
-        [SerializeField] private TextMeshProUGUI summaryText;
-        [SerializeField] private TextMeshProUGUI detailsText;
+        [SerializeField] private Text summaryText;
+        [SerializeField] private Text detailsText;
         [SerializeField] private Button restartButton;
         [SerializeField] private Button lobbyButton;
         [SerializeField] private ScenarioController scenarioController;
@@ -58,7 +57,7 @@ namespace VRTraining.UI
             if (summaryText != null)
             {
                 summaryText.text =
-                    $"Итог: ✓ {result.SuccessCount}  ✗ {result.FailedCount}  → {result.SkippedCount}";
+                    $"Итог: OK {result.SuccessCount}  FAIL {result.FailedCount}  SKIP {result.SkippedCount}";
             }
 
             if (detailsText == null)
@@ -86,10 +85,10 @@ namespace VRTraining.UI
         {
             switch (status)
             {
-                case StepStatus.Success: return "✓ успех";
-                case StepStatus.Failed: return "✗ ошибка";
-                case StepStatus.Skipped: return "→ пропущен";
-                default: return "? ожидание";
+                case StepStatus.Success: return "[OK]";
+                case StepStatus.Failed: return "[FAIL]";
+                case StepStatus.Skipped: return "[SKIP]";
+                default: return "[...]";
             }
         }
 

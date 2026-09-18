@@ -1,4 +1,3 @@
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using VRTraining.Core.Events;
@@ -11,8 +10,8 @@ namespace VRTraining.UI
     public class ScenarioInfoPanel : MonoBehaviour
     {
         [SerializeField] private CanvasGroup canvasGroup;
-        [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private TextMeshProUGUI bodyText;
+        [SerializeField] private Text titleText;
+        [SerializeField] private Text bodyText;
         [SerializeField] private float visibleSeconds = 8f;
         [SerializeField] private float fadeSeconds = 0.4f;
 
