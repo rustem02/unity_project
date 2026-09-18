@@ -1,0 +1,15 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/_Project/Scenes/Lobby.unity
+    guid: d3115a0d2f453ab44aa82a7b11149cbb
+  - enabled: 1
+    path: Assets/_Project/Scenes/Training.unity
+    guid: 559f7d26e0f13d342ba63b9775d9b63b
+  m_configObjects:
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: eceb77043c60364439e615da9f30f271, type: 2}
